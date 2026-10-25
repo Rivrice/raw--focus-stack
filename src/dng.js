@@ -112,7 +112,7 @@ async function decodeDNG(buffer, opts = {}) {
   if (isCFA) {
     const pat = cfaPattern(r, ifd);
     if (opts.half) { ({ out, ow, oh } = superpixel(norm, aw, ah, pat)); }
-    else { out = demosaicMHC(norm, aw, ah, pat); ow = aw; oh = ah; }
+    else { out = demosaicEdge(norm, aw, ah, pat); ow = aw; oh = ah; }
   } else if (opts.half) {
     ({ out, ow, oh } = halve3(norm, aw, ah));
   } else { out = norm; ow = aw; oh = ah; }
@@ -366,38 +366,68 @@ function halve3(m, w, h) {
   return { out, ow, oh };
 }
 
-// Malvar-He-Cutler gradient-corrected bilinear demosaic.
-function demosaicMHC(m, w, h, pat) {
+// Edge-directed demosaic: Hamilton-Adams style green interpolation (choose the direction with the
+// smaller gradient, with a Laplacian correction from the centre colour), then red/blue by
+// bilinear interpolation of colour differences (R-G, B-G).
+function demosaicEdge(m, w, h, pat) {
   const P = 2, pw = w + 2 * P, ph = h + 2 * P;
-  const pad = new Int32Array(pw * ph);
+  const pad = new Float32Array(pw * ph);
   const refl = (i, n) => (i < 0 ? -i : i >= n ? 2 * n - 2 - i : i);
   for (let y = 0; y < ph; y++) {
     const sy = refl(y - P, h);
     for (let x = 0; x < pw; x++) pad[y * pw + x] = m[sy * w + refl(x - P, w)];
   }
+  const colorAt = (y, x) => pat[((y & 1) << 1) | (x & 1)]; // y, x in image coords (pattern phase preserved by reflection)
+  // 1. Green plane
+  const G = new Float32Array(pw * ph);
+  for (let y = 0; y < ph; y++) {
+    for (let x = 0; x < pw; x++) {
+      const i = y * pw + x;
+      if (colorAt(y - P, x - P) === 1 || x < 2 || y < 2 || x >= pw - 2 || y >= ph - 2) { G[i] = pad[i]; continue; }
+      const c = pad[i];
+      const lapH = 2 * c - pad[i - 2] - pad[i + 2], lapV = 2 * c - pad[i - 2 * pw] - pad[i + 2 * pw];
+      const dH = Math.abs(pad[i - 1] - pad[i + 1]) + Math.abs(lapH);
+      const dV = Math.abs(pad[i - pw] - pad[i + pw]) + Math.abs(lapV);
+      const gH = (pad[i - 1] + pad[i + 1]) / 2 + lapH / 4;
+      const gV = (pad[i - pw] + pad[i + pw]) / 2 + lapV / 4;
+      G[i] = dH < dV ? gH : dV < dH ? gV : (gH + gV) / 2;
+    }
+  }
+  // Border pixels of the padded plane at non-green sites: simple average of neighbours.
+  for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
+    if (x >= 2 && y >= 2 && x < pw - 2 && y < ph - 2) continue;
+    if (colorAt(y - P, x - P) === 1) continue;
+    let s = 0, n = 0;
+    for (const [dy, dx] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const yy = y + dy, xx = x + dx;
+      if (yy >= 0 && xx >= 0 && yy < ph && xx < pw) { s += pad[yy * pw + xx]; n++; }
+    }
+    G[y * pw + x] = s / n;
+  }
+  // 2. Colour differences at their own sites, then bilinear fill.
   const out = new Uint16Array(w * h * 3);
-  const clamp = (v) => (v <= 0 ? 0 : v >= 65535 ? 65535 : v);
-  const s1 = pw, s2 = 2 * pw;
+  const clamp = (v) => (v <= 0 ? 0 : v >= 65535 ? 65535 : v + 0.5);
+  const diff = (i, c, y, x) => (colorAt(y, x) === c ? pad[i] - G[i] : NaN);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const i = (y + P) * pw + x + P;
-      const c = pat[((y & 1) << 1) | (x & 1)];
+      const yy = y + P, xx = x + P, i = yy * pw + xx;
+      const c = colorAt(y, x);
+      const g = G[i];
       const o = (y * w + x) * 3;
-      const v = pad[i];
-      if (c === 1) {
-        // Green site: R/B from horizontal or vertical neighbours.
-        const horiz = (8 * 5 * v + 8 * 4 * (pad[i - 1] + pad[i + 1]) - 8 * (pad[i - 2] + pad[i + 2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - s2] + pad[i + s2])) / 64;
-        const vert = (8 * 5 * v + 8 * 4 * (pad[i - s1] + pad[i + s1]) - 8 * (pad[i - s2] + pad[i + s2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - 2] + pad[i + 2])) / 64;
-        const rowIsR = pat[((y & 1) << 1) | ((x + 1) & 1)] === 0;
-        out[o + 1] = v;
-        out[o] = clamp(rowIsR ? horiz : vert);
-        out[o + 2] = clamp(rowIsR ? vert : horiz);
-      } else {
-        const g = (4 * v + 2 * (pad[i - 1] + pad[i + 1] + pad[i - s1] + pad[i + s1]) - (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
-        const d = (6 * v + 2 * (pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) - 1.5 * (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
-        out[o + 1] = clamp(g);
-        if (c === 0) { out[o] = v; out[o + 2] = clamp(d); }
-        else { out[o + 2] = v; out[o] = clamp(d); }
+      out[o + 1] = clamp(g);
+      for (const t of [0, 2]) {
+        let v;
+        if (c === t) v = pad[i];
+        else if (c === 1) {
+          // Green site: the target colour is either left/right or above/below.
+          const hd = diff(i - 1, t, y, x - 1);
+          v = !Number.isNaN(hd) ? g + (hd + (pad[i + 1] - G[i + 1])) / 2
+            : g + ((pad[i - pw] - G[i - pw]) + (pad[i + pw] - G[i + pw])) / 2;
+        } else {
+          // Opposite chroma site: the target colour is on the four diagonals.
+          v = g + ((pad[i - pw - 1] - G[i - pw - 1]) + (pad[i - pw + 1] - G[i - pw + 1]) + (pad[i + pw - 1] - G[i + pw - 1]) + (pad[i + pw + 1] - G[i + pw + 1])) / 4;
+        }
+        out[o + t] = clamp(v);
       }
     }
   }

@@ -1,9 +1,6 @@
 <title>RAW深度合成</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
 :root {
@@ -18,8 +15,8 @@
   --warn: #8a5a00;
   --warn-soft: #fbefd6;
   --track: #dfe3db;
-  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-body: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; /* system fonts only: no external requests */
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Roboto Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -136,7 +133,9 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 details { font-size: 0.88rem; color: var(--muted); }
 details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details ul { padding-left: 1.2em; margin: 8px 0 0; }
-footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
+footer { color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+footer p { margin: 0; }
+footer a { color: inherit; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
@@ -256,7 +255,11 @@ footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
     </div>
   </section>
 
-  <footer>位置合わせ: 相似変換（拡大縮小・回転・平行移動）／合成: 局所コントラストによる深度マップ方式</footer>
+  <footer>
+    <p>このページは外部と通信しません。読み込んだ画像は端末内だけで処理されます。</p>
+    <p>This product includes DNG technology under license by Adobe.<br>DNG、Lightroom は Adobe の、iPhone は Apple Inc. の、その他の製品名は各社の商標または登録商標です。本ツールはそれらの企業とは関係ありません。</p>
+    <p>MIT License・無保証で提供されます。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコード</a></p>
+  </footer>
 </div>
 
 <script>
