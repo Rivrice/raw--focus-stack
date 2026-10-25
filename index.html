@@ -1,9 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style></head><body><title>RAW深度合成</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
 :root {
@@ -18,8 +15,8 @@
   --warn: #8a5a00;
   --warn-soft: #fbefd6;
   --track: #dfe3db;
-  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-body: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; /* system fonts only: no external requests */
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Roboto Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -136,7 +133,9 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 details { font-size: 0.88rem; color: var(--muted); }
 details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details ul { padding-left: 1.2em; margin: 8px 0 0; }
-footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
+footer { color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+footer p { margin: 0; }
+footer a { color: inherit; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
@@ -256,7 +255,11 @@ footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
     </div>
   </section>
 
-  <footer>位置合わせ: 相似変換（拡大縮小・回転・平行移動）／合成: 局所コントラストによる深度マップ方式</footer>
+  <footer>
+    <p>このページは外部と通信しません。読み込んだ画像は端末内だけで処理されます。</p>
+    <p>This product includes DNG technology under license by Adobe.<br>DNG、Lightroom は Adobe の、iPhone は Apple Inc. の、その他の製品名は各社の商標または登録商標です。本ツールはそれらの企業とは関係ありません。</p>
+    <p>MIT License・無保証で提供されます。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコード</a></p>
+  </footer>
 </div>
 
 <script>
@@ -745,7 +748,7 @@ async function decodeDNG(buffer, opts = {}) {
   if (isCFA) {
     const pat = cfaPattern(r, ifd);
     if (opts.half) { ({ out, ow, oh } = superpixel(norm, aw, ah, pat)); }
-    else { out = demosaicMHC(norm, aw, ah, pat); ow = aw; oh = ah; }
+    else { out = demosaicEdge(norm, aw, ah, pat); ow = aw; oh = ah; }
   } else if (opts.half) {
     ({ out, ow, oh } = halve3(norm, aw, ah));
   } else { out = norm; ow = aw; oh = ah; }
@@ -999,38 +1002,68 @@ function halve3(m, w, h) {
   return { out, ow, oh };
 }
 
-// Malvar-He-Cutler gradient-corrected bilinear demosaic.
-function demosaicMHC(m, w, h, pat) {
+// Edge-directed demosaic: Hamilton-Adams style green interpolation (choose the direction with the
+// smaller gradient, with a Laplacian correction from the centre colour), then red/blue by
+// bilinear interpolation of colour differences (R-G, B-G).
+function demosaicEdge(m, w, h, pat) {
   const P = 2, pw = w + 2 * P, ph = h + 2 * P;
-  const pad = new Int32Array(pw * ph);
+  const pad = new Float32Array(pw * ph);
   const refl = (i, n) => (i < 0 ? -i : i >= n ? 2 * n - 2 - i : i);
   for (let y = 0; y < ph; y++) {
     const sy = refl(y - P, h);
     for (let x = 0; x < pw; x++) pad[y * pw + x] = m[sy * w + refl(x - P, w)];
   }
+  const colorAt = (y, x) => pat[((y & 1) << 1) | (x & 1)]; // y, x in image coords (pattern phase preserved by reflection)
+  // 1. Green plane
+  const G = new Float32Array(pw * ph);
+  for (let y = 0; y < ph; y++) {
+    for (let x = 0; x < pw; x++) {
+      const i = y * pw + x;
+      if (colorAt(y - P, x - P) === 1 || x < 2 || y < 2 || x >= pw - 2 || y >= ph - 2) { G[i] = pad[i]; continue; }
+      const c = pad[i];
+      const lapH = 2 * c - pad[i - 2] - pad[i + 2], lapV = 2 * c - pad[i - 2 * pw] - pad[i + 2 * pw];
+      const dH = Math.abs(pad[i - 1] - pad[i + 1]) + Math.abs(lapH);
+      const dV = Math.abs(pad[i - pw] - pad[i + pw]) + Math.abs(lapV);
+      const gH = (pad[i - 1] + pad[i + 1]) / 2 + lapH / 4;
+      const gV = (pad[i - pw] + pad[i + pw]) / 2 + lapV / 4;
+      G[i] = dH < dV ? gH : dV < dH ? gV : (gH + gV) / 2;
+    }
+  }
+  // Border pixels of the padded plane at non-green sites: simple average of neighbours.
+  for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
+    if (x >= 2 && y >= 2 && x < pw - 2 && y < ph - 2) continue;
+    if (colorAt(y - P, x - P) === 1) continue;
+    let s = 0, n = 0;
+    for (const [dy, dx] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const yy = y + dy, xx = x + dx;
+      if (yy >= 0 && xx >= 0 && yy < ph && xx < pw) { s += pad[yy * pw + xx]; n++; }
+    }
+    G[y * pw + x] = s / n;
+  }
+  // 2. Colour differences at their own sites, then bilinear fill.
   const out = new Uint16Array(w * h * 3);
-  const clamp = (v) => (v <= 0 ? 0 : v >= 65535 ? 65535 : v);
-  const s1 = pw, s2 = 2 * pw;
+  const clamp = (v) => (v <= 0 ? 0 : v >= 65535 ? 65535 : v + 0.5);
+  const diff = (i, c, y, x) => (colorAt(y, x) === c ? pad[i] - G[i] : NaN);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const i = (y + P) * pw + x + P;
-      const c = pat[((y & 1) << 1) | (x & 1)];
+      const yy = y + P, xx = x + P, i = yy * pw + xx;
+      const c = colorAt(y, x);
+      const g = G[i];
       const o = (y * w + x) * 3;
-      const v = pad[i];
-      if (c === 1) {
-        // Green site: R/B from horizontal or vertical neighbours.
-        const horiz = (8 * 5 * v + 8 * 4 * (pad[i - 1] + pad[i + 1]) - 8 * (pad[i - 2] + pad[i + 2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - s2] + pad[i + s2])) / 64;
-        const vert = (8 * 5 * v + 8 * 4 * (pad[i - s1] + pad[i + s1]) - 8 * (pad[i - s2] + pad[i + s2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - 2] + pad[i + 2])) / 64;
-        const rowIsR = pat[((y & 1) << 1) | ((x + 1) & 1)] === 0;
-        out[o + 1] = v;
-        out[o] = clamp(rowIsR ? horiz : vert);
-        out[o + 2] = clamp(rowIsR ? vert : horiz);
-      } else {
-        const g = (4 * v + 2 * (pad[i - 1] + pad[i + 1] + pad[i - s1] + pad[i + s1]) - (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
-        const d = (6 * v + 2 * (pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) - 1.5 * (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
-        out[o + 1] = clamp(g);
-        if (c === 0) { out[o] = v; out[o + 2] = clamp(d); }
-        else { out[o + 2] = v; out[o] = clamp(d); }
+      out[o + 1] = clamp(g);
+      for (const t of [0, 2]) {
+        let v;
+        if (c === t) v = pad[i];
+        else if (c === 1) {
+          // Green site: the target colour is either left/right or above/below.
+          const hd = diff(i - 1, t, y, x - 1);
+          v = !Number.isNaN(hd) ? g + (hd + (pad[i + 1] - G[i + 1])) / 2
+            : g + ((pad[i - pw] - G[i - pw]) + (pad[i + pw] - G[i + pw])) / 2;
+        } else {
+          // Opposite chroma site: the target colour is on the four diagonals.
+          v = g + ((pad[i - pw - 1] - G[i - pw - 1]) + (pad[i - pw + 1] - G[i - pw + 1]) + (pad[i + pw - 1] - G[i + pw - 1]) + (pad[i + pw + 1] - G[i + pw + 1])) / 4;
+        }
+        out[o + t] = clamp(v);
       }
     }
   }

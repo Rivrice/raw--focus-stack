@@ -1,0 +1,15 @@
+RAW深度合成 (raw--focus-stack)
+
+This product includes DNG technology under license by Adobe.
+(Required notice under the Digital Negative (DNG) Specification Patent License,
+which grants a royalty-free license to read and write DNG-compliant files.)
+
+Trademarks: Adobe, DNG, Lightroom are trademarks or registered trademarks of
+Adobe in the United States and/or other countries. iPhone and ProRAW are
+trademarks of Apple Inc. Pixel is a trademark of Google LLC. Galaxy is a
+trademark of Samsung Electronics Co., Ltd. Xperia is a trademark of Sony Group
+Corporation. This project is not affiliated with or endorsed by any of them.
+
+All code in this repository is original. No third-party source code, libraries,
+fonts or images are bundled. The built-in sample images are generated
+procedurally at runtime.
