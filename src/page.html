@@ -1,0 +1,270 @@
+<title>RAW深度合成</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
+:root {
+  --bg: #eef0eb;
+  --surface: #fbfcf9;
+  --ink: #1a1f1b;
+  --muted: #5a645c;
+  --line: #d3d8cf;
+  --accent: #c42f4c;      /* focus-peaking red */
+  --accent-ink: #ffffff;
+  --accent-soft: #f6dfe3;
+  --warn: #8a5a00;
+  --warn-soft: #fbefd6;
+  --track: #dfe3db;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111412; --surface: #191d1a; --ink: #e6eae4; --muted: #9aa49c; --line: #2c332e;
+    --accent: #ff5d78; --accent-ink: #1a0b0f; --accent-soft: #3a1c23; --warn: #f0c46a; --warn-soft: #33290f; --track: #2a302c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111412; --surface: #191d1a; --ink: #e6eae4; --muted: #9aa49c; --line: #2c332e;
+  --accent: #ff5d78; --accent-ink: #1a0b0f; --accent-soft: #3a1c23; --warn: #f0c46a; --warn-soft: #33290f; --track: #2a302c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; flex-direction: column; gap: 6px; padding-block: 6px 4px; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.02em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
+h1 .mark { width: 22px; height: 22px; flex: none; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.formats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
+section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.step-head { display: flex; align-items: baseline; gap: 10px; }
+.step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; }
+h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.hint { margin: 0; color: var(--muted); font-size: 0.86rem; }
+.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center;
+  border: 1.5px dashed var(--line); border-radius: 8px; padding: 22px 12px; cursor: pointer; background: var(--bg);
+}
+.drop:hover, .drop.over { border-color: var(--accent); }
+.drop strong { font-size: 1rem; }
+.drop span { color: var(--muted); font-size: 0.85rem; }
+.drop { position: relative; }
+.drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.filebar .meta { font-size: 0.86rem; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+ol.files { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+ol.files li { display: flex; gap: 10px; padding: 6px 10px; font-size: 0.85rem; border-bottom: 1px solid var(--line); min-width: 0; }
+ol.files li:last-child { border-bottom: 0; }
+ol.files .n { font-family: var(--font-mono); color: var(--muted); width: 2.4em; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+ol.files .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.files .sz { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.settings { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+@media (max-width: 560px) { .settings { grid-template-columns: 1fr; } }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field > label, .field > .lbl { font-weight: 500; font-size: 0.92rem; display: flex; justify-content: space-between; gap: 8px; }
+.field output { font-family: var(--font-mono); color: var(--accent); font-size: 0.85rem; }
+.field small { color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg label { flex: 1; text-align: center; padding: 7px 6px; font-size: 0.86rem; cursor: pointer; border-right: 1px solid var(--line); user-select: none; }
+.seg label:last-child { border-right: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:checked) { background: var(--ink); color: var(--bg); }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 0.86rem; color: var(--muted); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 14px; }
+button:hover:not(:disabled) { border-color: var(--ink); }
+button:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; padding: 12px 18px; font-size: 1rem; }
+button.primary:hover:not(:disabled) { filter: brightness(1.06); border-color: var(--accent); }
+button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px; font-size: 0.85rem; }
+.runrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.runrow .primary { flex: 1 1 220px; }
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.25s ease; }
+.progress .ptext { font-size: 0.85rem; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.progress .ptext span:last-child { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.result-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.viewer { position: relative; background: var(--bg); border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.viewer.flash { animation: flash 0.9s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .viewer.flash { animation: none; } }
+.viewer canvas { display: block; width: 100%; height: auto; cursor: zoom-in; touch-action: manipulation; }
+.viewer .tag { position: absolute; left: 8px; top: 8px; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; pointer-events: none; }
+.zoombox { display: flex; flex-direction: column; gap: 6px; }
+.zoombox canvas { width: 100%; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-left: 2px solid var(--line); }
+.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.98rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat span { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; }
+.rail { display: flex; flex-direction: column; gap: 4px; }
+.rail-row { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) 4.2em 5.4em; gap: 8px; align-items: center; font-size: 0.8rem; }
+.rail-row .i { font-family: var(--font-mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.rail-row .track { height: 10px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.rail-row .track i { display: block; height: 100%; border-radius: 3px; }
+.rail-row .v, .rail-row .s { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.rail-row .s { color: var(--muted); }
+.rail-head { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; }
+.exports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+.exports button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.exports button b { font-size: 0.95rem; }
+.exports button span { font-size: 0.75rem; color: var(--muted); }
+.notice { font-size: 0.85rem; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); }
+.notice ul { margin: 0; padding-left: 1.2em; }
+.error { font-size: 0.9rem; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tabs button { border: 0; border-radius: 0; padding: 6px 12px; font-size: 0.85rem; background: transparent; }
+.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--muted); }
+.legend i { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(90deg, rgb(38,70,83), rgb(42,157,143), rgb(138,177,125), rgb(233,196,106), rgb(244,162,97), rgb(231,111,81), rgb(190,60,90)); }
+details { font-size: 0.88rem; color: var(--muted); }
+details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+details ul { padding-left: 1.2em; margin: 8px 0 0; }
+footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
+.saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
+    <p class="lede">ピント位置をずらして撮ったRAW(DNG)を、手前から奥までピントの合った1枚にまとめます。処理はすべてこの端末の中で行われ、画像がどこかへ送信されることはありません。</p>
+    <div class="formats" aria-label="対応形式">
+      <span class="chip">入力 DNG（ベイヤー / LinearRaw）</span>
+      <span class="chip">出力 DNG</span><span class="chip">16bit TIFF</span><span class="chip">JPEG</span>
+    </div>
+  </header>
+
+  <section class="step" aria-labelledby="s1">
+    <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
+    <div class="drop" id="drop">
+      <strong>DNGファイルをまとめて選択</strong>
+      <span>ピント位置の順に並んだ2枚以上のファイル。ファイル名順に処理します</span>
+      <input type="file" id="file" multiple aria-label="DNGファイルを選択">
+    </div>
+    <p class="hint">選択画面が開かない場合は、このページをSafariやChromeなどのブラウザで開いてお試しください。</p>
+    <div class="filebar" id="filebar" hidden>
+      <div class="meta" id="fileMeta"></div>
+      <div><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
+    </div>
+    <ol class="files" id="fileList" hidden></ol>
+    <details>
+      <summary>対応しているRAWについて</summary>
+      <ul>
+        <li>iPhone（ProRAW / サードパーティアプリのRAW）、Pixel・Galaxy・Xperiaなど Android のDNGに対応しています。</li>
+        <li>カメラ固有のRAW（CR3 / NEF / ARW / RAF など）は、Adobe DNG Converter や Lightroom で DNG に変換してから読み込んでください。</li>
+        <li>X-Trans センサーのDNG、浮動小数点DNG（HDR合成済み）には対応していません。</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="step" aria-labelledby="s2">
+    <div class="step-head"><span class="step-no">STEP 2</span><h2 id="s2">合成の設定</h2></div>
+    <div class="settings">
+      <div class="field">
+        <span class="lbl">処理サイズ</span>
+        <div class="seg" role="radiogroup" aria-label="処理サイズ">
+          <label><input type="radio" name="size" id="sizeFull" value="full" checked>フル解像度</label>
+          <label><input type="radio" name="size" id="sizeHalf" value="half">1/2（高速）</label>
+        </div>
+        <small id="sizeHint">1/2は縦横半分で処理します。メモリが少ない端末や4800万画素級のRAWで選んでください。</small>
+      </div>
+      <div class="field">
+        <span class="lbl">位置合わせ</span>
+        <label class="check"><input type="checkbox" id="align" checked>ずれと画角変化（フォーカスブリージング）を補正</label>
+        <label class="check"><input type="checkbox" id="rotate" checked>回転も補正する（手持ち撮影向け）</label>
+      </div>
+      <div class="field">
+        <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
+        <input type="range" id="detail" min="1" max="10" step="1" value="3">
+        <small>小さいほど細部を拾い、大きいほどノイズや平坦部に強くなります。</small>
+      </div>
+      <div class="field">
+        <label for="smooth">境界のなめらかさ <output id="smoothOut">2</output></label>
+        <input type="range" id="smooth" min="0" max="10" step="1" value="2">
+        <small>フレーム同士のつなぎ目をぼかす幅です。継ぎ目が目立つときは上げてください。</small>
+      </div>
+    </div>
+    <div class="runrow">
+      <button class="primary" id="run" type="button" disabled>深度合成を開始</button>
+      <button id="demo" type="button">サンプルで試す</button>
+    </div>
+    <div class="progress" id="progress" hidden>
+      <div class="bar"><i id="barFill"></i></div>
+      <div class="ptext"><span id="pText">準備中</span><span id="pTime">0s</span></div>
+    </div>
+    <div class="error" id="error" role="alert" hidden></div>
+  </section>
+
+  <section class="step" aria-labelledby="s3" id="resultSec">
+    <div class="result-head">
+      <div class="step-head"><span class="step-no">STEP 3</span><h2 id="s3">結果を確認して保存</h2></div>
+      <span class="badge" id="demoBadge" hidden>サンプル</span>
+    </div>
+    <p class="hint" id="resultEmpty">合成するとここにプレビューが表示されます。サンプルを準備しています…</p>
+    <div id="resultBody" hidden>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px">
+          <div class="tabs" role="group" aria-label="表示">
+            <button type="button" id="tabImage" aria-pressed="true">合成結果</button>
+            <button type="button" id="tabFirst" aria-pressed="false">合成前（1枚目）</button>
+            <button type="button" id="tabDepth" aria-pressed="false">深度マップ</button>
+          </div>
+          <span class="hint">画像をタップすると等倍で確認できます</span>
+        </div>
+        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><span class="tag" id="viewTag">合成結果</span></div>
+        <div class="legend" id="legend" hidden><span>1枚目（手前）</span><i></i><span id="legendEnd">最後</span></div>
+        <div class="zoombox" id="zoombox" hidden>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="hint">等倍表示（タップした位置）</span><button class="ghost" type="button" id="zoomClose">閉じる</button></div>
+          <canvas id="zoom"></canvas>
+        </div>
+        <div class="field">
+          <label for="exposure">明るさ（JPEG / TIFF / プレビュー） <output id="expOut">±0.0 EV</output></label>
+          <input type="range" id="exposure" min="-3" max="3" step="0.1" value="0">
+          <small>DNGには反映されません。DNGはLightroomなどで自由に調整できます。</small>
+        </div>
+        <div class="stats">
+          <div class="stat"><b id="stSize">-</b><span>出力サイズ</span></div>
+          <div class="stat"><b id="stFrames">-</b><span>使用フレーム</span></div>
+          <div class="stat"><b id="stTime">-</b><span>処理時間</span></div>
+        </div>
+        <div class="rail" id="rail" aria-label="フレームごとの採用率"></div>
+        <div class="notice" id="warn" hidden></div>
+        <div class="exports">
+          <button type="button" data-fmt="dng"><b>DNGで保存</b><span>16bit リニアRAW・色温度を後から調整可</span></button>
+          <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB・レタッチ用</span></button>
+          <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有・SNS用</span></button>
+        </div>
+        <div class="saved" id="saved" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>位置合わせ: 相似変換（拡大縮小・回転・平行移動）／合成: 局所コントラストによる深度マップ方式</footer>
+</div>
+
+<script>
+function coreFactory() {
+/*__CORE__*/
+return { handleMessage };
+}
+</script>
+<script>
+/*__UI__*/
+</script>

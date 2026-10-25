@@ -1,0 +1,2248 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style></head><body><title>RAW深度合成</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
+:root {
+  --bg: #eef0eb;
+  --surface: #fbfcf9;
+  --ink: #1a1f1b;
+  --muted: #5a645c;
+  --line: #d3d8cf;
+  --accent: #c42f4c;      /* focus-peaking red */
+  --accent-ink: #ffffff;
+  --accent-soft: #f6dfe3;
+  --warn: #8a5a00;
+  --warn-soft: #fbefd6;
+  --track: #dfe3db;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111412; --surface: #191d1a; --ink: #e6eae4; --muted: #9aa49c; --line: #2c332e;
+    --accent: #ff5d78; --accent-ink: #1a0b0f; --accent-soft: #3a1c23; --warn: #f0c46a; --warn-soft: #33290f; --track: #2a302c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111412; --surface: #191d1a; --ink: #e6eae4; --muted: #9aa49c; --line: #2c332e;
+  --accent: #ff5d78; --accent-ink: #1a0b0f; --accent-soft: #3a1c23; --warn: #f0c46a; --warn-soft: #33290f; --track: #2a302c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; flex-direction: column; gap: 6px; padding-block: 6px 4px; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.02em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
+h1 .mark { width: 22px; height: 22px; flex: none; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.formats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
+section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.step-head { display: flex; align-items: baseline; gap: 10px; }
+.step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; }
+h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.hint { margin: 0; color: var(--muted); font-size: 0.86rem; }
+.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center;
+  border: 1.5px dashed var(--line); border-radius: 8px; padding: 22px 12px; cursor: pointer; background: var(--bg);
+}
+.drop:hover, .drop.over { border-color: var(--accent); }
+.drop strong { font-size: 1rem; }
+.drop span { color: var(--muted); font-size: 0.85rem; }
+.drop { position: relative; }
+.drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.filebar .meta { font-size: 0.86rem; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+ol.files { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+ol.files li { display: flex; gap: 10px; padding: 6px 10px; font-size: 0.85rem; border-bottom: 1px solid var(--line); min-width: 0; }
+ol.files li:last-child { border-bottom: 0; }
+ol.files .n { font-family: var(--font-mono); color: var(--muted); width: 2.4em; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+ol.files .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.files .sz { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.settings { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+@media (max-width: 560px) { .settings { grid-template-columns: 1fr; } }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field > label, .field > .lbl { font-weight: 500; font-size: 0.92rem; display: flex; justify-content: space-between; gap: 8px; }
+.field output { font-family: var(--font-mono); color: var(--accent); font-size: 0.85rem; }
+.field small { color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg label { flex: 1; text-align: center; padding: 7px 6px; font-size: 0.86rem; cursor: pointer; border-right: 1px solid var(--line); user-select: none; }
+.seg label:last-child { border-right: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:checked) { background: var(--ink); color: var(--bg); }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 0.86rem; color: var(--muted); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 14px; }
+button:hover:not(:disabled) { border-color: var(--ink); }
+button:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; padding: 12px 18px; font-size: 1rem; }
+button.primary:hover:not(:disabled) { filter: brightness(1.06); border-color: var(--accent); }
+button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px; font-size: 0.85rem; }
+.runrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.runrow .primary { flex: 1 1 220px; }
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.25s ease; }
+.progress .ptext { font-size: 0.85rem; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.progress .ptext span:last-child { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.result-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.viewer { position: relative; background: var(--bg); border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.viewer.flash { animation: flash 0.9s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .viewer.flash { animation: none; } }
+.viewer canvas { display: block; width: 100%; height: auto; cursor: zoom-in; touch-action: manipulation; }
+.viewer .tag { position: absolute; left: 8px; top: 8px; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; pointer-events: none; }
+.zoombox { display: flex; flex-direction: column; gap: 6px; }
+.zoombox canvas { width: 100%; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-left: 2px solid var(--line); }
+.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.98rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat span { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; }
+.rail { display: flex; flex-direction: column; gap: 4px; }
+.rail-row { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) 4.2em 5.4em; gap: 8px; align-items: center; font-size: 0.8rem; }
+.rail-row .i { font-family: var(--font-mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.rail-row .track { height: 10px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.rail-row .track i { display: block; height: 100%; border-radius: 3px; }
+.rail-row .v, .rail-row .s { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.rail-row .s { color: var(--muted); }
+.rail-head { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; }
+.exports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+.exports button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.exports button b { font-size: 0.95rem; }
+.exports button span { font-size: 0.75rem; color: var(--muted); }
+.notice { font-size: 0.85rem; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); }
+.notice ul { margin: 0; padding-left: 1.2em; }
+.error { font-size: 0.9rem; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tabs button { border: 0; border-radius: 0; padding: 6px 12px; font-size: 0.85rem; background: transparent; }
+.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--muted); }
+.legend i { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(90deg, rgb(38,70,83), rgb(42,157,143), rgb(138,177,125), rgb(233,196,106), rgb(244,162,97), rgb(231,111,81), rgb(190,60,90)); }
+details { font-size: 0.88rem; color: var(--muted); }
+details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+details ul { padding-left: 1.2em; margin: 8px 0 0; }
+footer { color: var(--muted); font-size: 0.78rem; text-align: center; }
+.saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
+    <p class="lede">ピント位置をずらして撮ったRAW(DNG)を、手前から奥までピントの合った1枚にまとめます。処理はすべてこの端末の中で行われ、画像がどこかへ送信されることはありません。</p>
+    <div class="formats" aria-label="対応形式">
+      <span class="chip">入力 DNG（ベイヤー / LinearRaw）</span>
+      <span class="chip">出力 DNG</span><span class="chip">16bit TIFF</span><span class="chip">JPEG</span>
+    </div>
+  </header>
+
+  <section class="step" aria-labelledby="s1">
+    <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
+    <div class="drop" id="drop">
+      <strong>DNGファイルをまとめて選択</strong>
+      <span>ピント位置の順に並んだ2枚以上のファイル。ファイル名順に処理します</span>
+      <input type="file" id="file" multiple aria-label="DNGファイルを選択">
+    </div>
+    <p class="hint">選択画面が開かない場合は、このページをSafariやChromeなどのブラウザで開いてお試しください。</p>
+    <div class="filebar" id="filebar" hidden>
+      <div class="meta" id="fileMeta"></div>
+      <div><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
+    </div>
+    <ol class="files" id="fileList" hidden></ol>
+    <details>
+      <summary>対応しているRAWについて</summary>
+      <ul>
+        <li>iPhone（ProRAW / サードパーティアプリのRAW）、Pixel・Galaxy・Xperiaなど Android のDNGに対応しています。</li>
+        <li>カメラ固有のRAW（CR3 / NEF / ARW / RAF など）は、Adobe DNG Converter や Lightroom で DNG に変換してから読み込んでください。</li>
+        <li>X-Trans センサーのDNG、浮動小数点DNG（HDR合成済み）には対応していません。</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="step" aria-labelledby="s2">
+    <div class="step-head"><span class="step-no">STEP 2</span><h2 id="s2">合成の設定</h2></div>
+    <div class="settings">
+      <div class="field">
+        <span class="lbl">処理サイズ</span>
+        <div class="seg" role="radiogroup" aria-label="処理サイズ">
+          <label><input type="radio" name="size" id="sizeFull" value="full" checked>フル解像度</label>
+          <label><input type="radio" name="size" id="sizeHalf" value="half">1/2（高速）</label>
+        </div>
+        <small id="sizeHint">1/2は縦横半分で処理します。メモリが少ない端末や4800万画素級のRAWで選んでください。</small>
+      </div>
+      <div class="field">
+        <span class="lbl">位置合わせ</span>
+        <label class="check"><input type="checkbox" id="align" checked>ずれと画角変化（フォーカスブリージング）を補正</label>
+        <label class="check"><input type="checkbox" id="rotate" checked>回転も補正する（手持ち撮影向け）</label>
+      </div>
+      <div class="field">
+        <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
+        <input type="range" id="detail" min="1" max="10" step="1" value="3">
+        <small>小さいほど細部を拾い、大きいほどノイズや平坦部に強くなります。</small>
+      </div>
+      <div class="field">
+        <label for="smooth">境界のなめらかさ <output id="smoothOut">2</output></label>
+        <input type="range" id="smooth" min="0" max="10" step="1" value="2">
+        <small>フレーム同士のつなぎ目をぼかす幅です。継ぎ目が目立つときは上げてください。</small>
+      </div>
+    </div>
+    <div class="runrow">
+      <button class="primary" id="run" type="button" disabled>深度合成を開始</button>
+      <button id="demo" type="button">サンプルで試す</button>
+    </div>
+    <div class="progress" id="progress" hidden>
+      <div class="bar"><i id="barFill"></i></div>
+      <div class="ptext"><span id="pText">準備中</span><span id="pTime">0s</span></div>
+    </div>
+    <div class="error" id="error" role="alert" hidden></div>
+  </section>
+
+  <section class="step" aria-labelledby="s3" id="resultSec">
+    <div class="result-head">
+      <div class="step-head"><span class="step-no">STEP 3</span><h2 id="s3">結果を確認して保存</h2></div>
+      <span class="badge" id="demoBadge" hidden>サンプル</span>
+    </div>
+    <p class="hint" id="resultEmpty">合成するとここにプレビューが表示されます。サンプルを準備しています…</p>
+    <div id="resultBody" hidden>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px">
+          <div class="tabs" role="group" aria-label="表示">
+            <button type="button" id="tabImage" aria-pressed="true">合成結果</button>
+            <button type="button" id="tabFirst" aria-pressed="false">合成前（1枚目）</button>
+            <button type="button" id="tabDepth" aria-pressed="false">深度マップ</button>
+          </div>
+          <span class="hint">画像をタップすると等倍で確認できます</span>
+        </div>
+        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><span class="tag" id="viewTag">合成結果</span></div>
+        <div class="legend" id="legend" hidden><span>1枚目（手前）</span><i></i><span id="legendEnd">最後</span></div>
+        <div class="zoombox" id="zoombox" hidden>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="hint">等倍表示（タップした位置）</span><button class="ghost" type="button" id="zoomClose">閉じる</button></div>
+          <canvas id="zoom"></canvas>
+        </div>
+        <div class="field">
+          <label for="exposure">明るさ（JPEG / TIFF / プレビュー） <output id="expOut">±0.0 EV</output></label>
+          <input type="range" id="exposure" min="-3" max="3" step="0.1" value="0">
+          <small>DNGには反映されません。DNGはLightroomなどで自由に調整できます。</small>
+        </div>
+        <div class="stats">
+          <div class="stat"><b id="stSize">-</b><span>出力サイズ</span></div>
+          <div class="stat"><b id="stFrames">-</b><span>使用フレーム</span></div>
+          <div class="stat"><b id="stTime">-</b><span>処理時間</span></div>
+        </div>
+        <div class="rail" id="rail" aria-label="フレームごとの採用率"></div>
+        <div class="notice" id="warn" hidden></div>
+        <div class="exports">
+          <button type="button" data-fmt="dng"><b>DNGで保存</b><span>16bit リニアRAW・色温度を後から調整可</span></button>
+          <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB・レタッチ用</span></button>
+          <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有・SNS用</span></button>
+        </div>
+        <div class="saved" id="saved" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>位置合わせ: 相似変換（拡大縮小・回転・平行移動）／合成: 局所コントラストによる深度マップ方式</footer>
+</div>
+
+<script>
+function coreFactory() {
+// ---- TIFF / DNG container: reader and writer ----
+
+const TIFF_TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 13: 4, 16: 8, 17: 8, 18: 8 };
+
+const TAG = {
+  NewSubFileType: 254, ImageWidth: 256, ImageLength: 257, BitsPerSample: 258, Compression: 259,
+  Photometric: 262, Make: 271, Model: 272, StripOffsets: 273, Orientation: 274, SamplesPerPixel: 277,
+  RowsPerStrip: 278, StripByteCounts: 279, PlanarConfig: 284, Software: 305, DateTime: 306,
+  Predictor: 317, TileWidth: 322, TileLength: 323, TileOffsets: 324, TileByteCounts: 325,
+  SubIFDs: 330, SampleFormat: 339, JPEGTables: 347,
+  CFARepeatPatternDim: 33421, CFAPattern: 33422, ExifIFD: 34665,
+  DNGVersion: 50706, DNGBackwardVersion: 50707, UniqueCameraModel: 50708, CFAPlaneColor: 50710,
+  CFALayout: 50711, LinearizationTable: 50712, BlackLevelRepeatDim: 50713, BlackLevel: 50714,
+  BlackLevelDeltaH: 50715, BlackLevelDeltaV: 50716, WhiteLevel: 50717, DefaultScale: 50718,
+  DefaultCropOrigin: 50719, DefaultCropSize: 50720, ColorMatrix1: 50721, ColorMatrix2: 50722,
+  CameraCalibration1: 50723, CameraCalibration2: 50724, AnalogBalance: 50727, AsShotNeutral: 50728,
+  AsShotWhiteXY: 50729, BaselineExposure: 50730, BaselineNoise: 50731, BaselineSharpness: 50732,
+  LinearResponseLimit: 50734, CalibrationIlluminant1: 50778, CalibrationIlluminant2: 50779,
+  ActiveArea: 50829, ForwardMatrix1: 50964, ForwardMatrix2: 50965,
+  OpcodeList1: 51008, OpcodeList2: 51009, OpcodeList3: 51022,
+};
+
+class TiffReader {
+  constructor(buffer) {
+    this.buf = buffer;
+    this.dv = new DataView(buffer);
+    const bo = this.dv.getUint16(0, false);
+    if (bo === 0x4949) this.le = true;
+    else if (bo === 0x4d4d) this.le = false;
+    else throw new Error('TIFF/DNG形式のファイルではありません');
+    const magic = this.dv.getUint16(2, this.le);
+    if (magic !== 42) throw new Error('TIFF/DNG形式のファイルではありません (magic ' + magic + ')');
+    this.ifds = [];
+    const seen = new Set();
+    let off = this.dv.getUint32(4, this.le);
+    let guard = 0;
+    while (off && off < buffer.byteLength && !seen.has(off) && guard++ < 64) {
+      seen.add(off);
+      const ifd = this.readIFD(off, 0, seen);
+      this.ifds.push(ifd);
+      off = ifd.next;
+    }
+  }
+
+  readIFD(off, depth, seen) {
+    const dv = this.dv, le = this.le;
+    const n = dv.getUint16(off, le);
+    const entries = new Map();
+    for (let i = 0; i < n; i++) {
+      const p = off + 2 + i * 12;
+      if (p + 12 > this.buf.byteLength) break;
+      const tag = dv.getUint16(p, le);
+      const type = dv.getUint16(p + 2, le);
+      const count = dv.getUint32(p + 4, le);
+      const size = (TIFF_TYPE_SIZE[type] || 1) * count;
+      const valOff = size <= 4 ? p + 8 : dv.getUint32(p + 8, le);
+      entries.set(tag, { tag, type, count, off: valOff });
+    }
+    const ifd = { off, entries, sub: [], next: 0 };
+    const nextPos = off + 2 + n * 12;
+    ifd.next = nextPos + 4 <= this.buf.byteLength ? dv.getUint32(nextPos, le) : 0;
+    if (depth < 3 && entries.has(TAG.SubIFDs)) {
+      for (const so of this.values(ifd, TAG.SubIFDs)) {
+        if (so && so < this.buf.byteLength && !seen.has(so)) {
+          seen.add(so);
+          ifd.sub.push(this.readIFD(so, depth + 1, seen));
+        }
+      }
+    }
+    return ifd;
+  }
+
+  has(ifd, tag) { return ifd.entries.has(tag); }
+
+  // Returns an array of numbers (rationals as floats), or a string for ASCII.
+  values(ifd, tag) {
+    const e = ifd.entries.get(tag);
+    if (!e) return null;
+    const dv = this.dv, le = this.le;
+    const out = [];
+    let p = e.off;
+    if (p + (TIFF_TYPE_SIZE[e.type] || 1) * e.count > this.buf.byteLength) return null;
+    switch (e.type) {
+      case 1: case 7: for (let i = 0; i < e.count; i++) out.push(dv.getUint8(p + i)); break;
+      case 6: for (let i = 0; i < e.count; i++) out.push(dv.getInt8(p + i)); break;
+      case 2: {
+        let s = '';
+        for (let i = 0; i < e.count; i++) { const c = dv.getUint8(p + i); if (!c) break; s += String.fromCharCode(c); }
+        return s.trim();
+      }
+      case 3: for (let i = 0; i < e.count; i++) out.push(dv.getUint16(p + i * 2, le)); break;
+      case 8: for (let i = 0; i < e.count; i++) out.push(dv.getInt16(p + i * 2, le)); break;
+      case 4: case 13: for (let i = 0; i < e.count; i++) out.push(dv.getUint32(p + i * 4, le)); break;
+      case 9: for (let i = 0; i < e.count; i++) out.push(dv.getInt32(p + i * 4, le)); break;
+      case 5: for (let i = 0; i < e.count; i++) { const d = dv.getUint32(p + i * 8 + 4, le); out.push(d ? dv.getUint32(p + i * 8, le) / d : 0); } break;
+      case 10: for (let i = 0; i < e.count; i++) { const d = dv.getInt32(p + i * 8 + 4, le); out.push(d ? dv.getInt32(p + i * 8, le) / d : 0); } break;
+      case 11: for (let i = 0; i < e.count; i++) out.push(dv.getFloat32(p + i * 4, le)); break;
+      case 12: for (let i = 0; i < e.count; i++) out.push(dv.getFloat64(p + i * 8, le)); break;
+      case 16: for (let i = 0; i < e.count; i++) out.push(Number(dv.getBigUint64(p + i * 8, le))); break;
+      default: return null;
+    }
+    return out;
+  }
+
+  value(ifd, tag, def) {
+    const v = this.values(ifd, tag);
+    if (v == null) return def;
+    return typeof v === 'string' ? v : v[0];
+  }
+
+  bytes(ifd, tag) {
+    const e = ifd.entries.get(tag);
+    if (!e) return null;
+    const size = (TIFF_TYPE_SIZE[e.type] || 1) * e.count;
+    return new Uint8Array(this.buf, e.off, size);
+  }
+
+  allIFDs() {
+    const out = [];
+    const walk = (ifd) => { out.push(ifd); ifd.sub.forEach(walk); };
+    this.ifds.forEach(walk);
+    return out;
+  }
+}
+
+// Minimal little-endian TIFF writer. `entries` is an array of
+// {tag, type, values} where values is an array of numbers, a string (ASCII),
+// or for rationals an array of numbers (converted with a fixed denominator).
+// Image data is supplied as one or more strips (Uint8Array).
+function writeTiff(entries, strips) {
+  const RAT_DEN = 1000000;
+  const list = entries.slice().sort((a, b) => a.tag - b.tag);
+  const n = list.length + 2; // + StripOffsets / StripByteCounts handled below
+  // Encode values.
+  const enc = list.map((e) => {
+    let bytes;
+    if (e.type === 2) {
+      const s = e.values + '\0';
+      bytes = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); bytes[i] = c < 128 ? c : 63; }
+      return { tag: e.tag, type: 2, count: s.length, bytes };
+    }
+    const vals = e.values;
+    const sz = TIFF_TYPE_SIZE[e.type];
+    bytes = new Uint8Array(sz * vals.length);
+    const dv = new DataView(bytes.buffer);
+    vals.forEach((v, i) => {
+      switch (e.type) {
+        case 1: case 7: dv.setUint8(i, v); break;
+        case 3: dv.setUint16(i * 2, v, true); break;
+        case 8: dv.setInt16(i * 2, v, true); break;
+        case 4: dv.setUint32(i * 4, v, true); break;
+        case 9: dv.setInt32(i * 4, v, true); break;
+        case 5: {
+          let num = v, den = RAT_DEN;
+          if (num * den > 4294967295) { den = Math.max(1, Math.floor(4294967295 / Math.max(num, 1))); }
+          dv.setUint32(i * 8, Math.round(num * den), true); dv.setUint32(i * 8 + 4, den, true); break;
+        }
+        case 10: {
+          let den = RAT_DEN;
+          if (Math.abs(v) * den > 2147483647) den = Math.max(1, Math.floor(2147483647 / Math.max(Math.abs(v), 1)));
+          dv.setInt32(i * 8, Math.round(v * den), true); dv.setInt32(i * 8 + 4, den, true); break;
+        }
+        case 11: dv.setFloat32(i * 4, v, true); break;
+        case 12: dv.setFloat64(i * 8, v, true); break;
+      }
+    });
+    return { tag: e.tag, type: e.type, count: vals.length, bytes };
+  });
+  const stripCount = strips.length;
+  enc.push({ tag: TAG.StripOffsets, type: 4, count: stripCount, bytes: null, isOffsets: true });
+  enc.push({ tag: TAG.StripByteCounts, type: 4, count: stripCount, bytes: new Uint8Array(new Uint32Array(strips.map((s) => s.length)).buffer) });
+  enc.sort((a, b) => a.tag - b.tag);
+
+  const ifdOff = 8;
+  const ifdSize = 2 + n * 12 + 4;
+  let extra = ifdOff + ifdSize;
+  const extraBlocks = [];
+  for (const e of enc) {
+    const size = e.isOffsets ? 4 * stripCount : e.bytes.length;
+    e.size = size;
+    if (size > 4) {
+      if (extra & 1) extra++;
+      e.valOff = extra;
+      extra += size;
+      extraBlocks.push(e);
+    }
+  }
+  let dataOff = (extra + 15) & ~15;
+  const stripOffs = [];
+  let total = dataOff;
+  for (const s of strips) { stripOffs.push(total); total += s.length; total = (total + 1) & ~1; }
+  const offBytes = new Uint8Array(new Uint32Array(stripOffs).buffer);
+  enc.find((e) => e.isOffsets).bytes = offBytes;
+
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  dv.setUint16(0, 0x4949, false);
+  dv.setUint16(2, 42, true);
+  dv.setUint32(4, ifdOff, true);
+  dv.setUint16(ifdOff, n, true);
+  enc.forEach((e, i) => {
+    const p = ifdOff + 2 + i * 12;
+    dv.setUint16(p, e.tag, true);
+    dv.setUint16(p + 2, e.type, true);
+    dv.setUint32(p + 4, e.count, true);
+    if (e.size > 4) { dv.setUint32(p + 8, e.valOff, true); out.set(e.bytes, e.valOff); }
+    else out.set(e.bytes, p + 8);
+  });
+  dv.setUint32(ifdOff + 2 + n * 12, 0, true);
+  strips.forEach((s, i) => out.set(s, stripOffs[i]));
+  return out;
+}
+
+// ---- Lossless JPEG (ITU T.81 process 14, "LJ92") decoder used by DNG compression 7 ----
+// Returns { width, height, comps, bits, data: Uint16Array (row-major, interleaved) }.
+
+function decodeLJ92(bytes) {
+  const len = bytes.length;
+  let pos = 0;
+  const u16 = (p) => (bytes[p] << 8) | bytes[p + 1];
+  if (u16(0) !== 0xffd8) throw new Error('ロスレスJPEGの開始マーカーがありません');
+  pos = 2;
+  const huff = [];
+  let frame = null, restart = 0;
+  while (pos < len) {
+    if (bytes[pos] !== 0xff) { pos++; continue; }
+    const marker = bytes[pos + 1];
+    pos += 2;
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0xff) { if (marker === 0xff) pos--; continue; }
+    if (marker === 0xd9) break;
+    const segLen = u16(pos);
+    const seg = pos + 2;
+    if (marker === 0xc3) {
+      frame = { bits: bytes[seg], height: u16(seg + 1), width: u16(seg + 3), comps: bytes[seg + 5], comp: [] };
+      for (let i = 0; i < frame.comps; i++) frame.comp.push({ id: bytes[seg + 6 + i * 3], hs: bytes[seg + 7 + i * 3] >> 4, vs: bytes[seg + 7 + i * 3] & 15 });
+    } else if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      throw new Error('ロスレスではないJPEGタイルです (SOF' + (marker - 0xc0) + ')');
+    } else if (marker === 0xc4) {
+      let p = seg;
+      const end = pos + segLen;
+      while (p < end) {
+        const tc = bytes[p++];
+        const counts = bytes.subarray(p, p + 16); p += 16;
+        let total = 0; for (let i = 0; i < 16; i++) total += counts[i];
+        const symbols = bytes.subarray(p, p + total); p += total;
+        huff[tc & 15] = buildHuff(counts, symbols);
+      }
+    } else if (marker === 0xdd) {
+      restart = u16(seg);
+    } else if (marker === 0xda) {
+      if (!frame) throw new Error('SOF3がありません');
+      const ns = bytes[seg];
+      const tables = [];
+      for (let i = 0; i < ns; i++) tables.push(huff[bytes[seg + 2 + i * 2] >> 4]);
+      const pred = bytes[seg + 1 + ns * 2];
+      const pt = bytes[seg + 3 + ns * 2] & 15;
+      pos += segLen;
+      return decodeScan(bytes, pos, frame, tables, pred, pt, restart);
+    }
+    pos += segLen;
+  }
+  throw new Error('ロスレスJPEGのスキャンが見つかりません');
+}
+
+function buildHuff(counts, symbols) {
+  // Lookup table on 16-bit code prefixes: lut[code16] = (len << 8) | symbol
+  const lut = new Uint16Array(65536);
+  let code = 0, k = 0;
+  for (let l = 1; l <= 16; l++) {
+    for (let i = 0; i < counts[l - 1]; i++) {
+      const sym = symbols[k++];
+      const shift = 16 - l;
+      const start = code << shift, end = (code + 1) << shift;
+      const v = (l << 8) | sym;
+      for (let c = start; c < end; c++) lut[c] = v;
+      code++;
+    }
+    code <<= 1;
+  }
+  return lut;
+}
+
+function decodeScan(bytes, start, frame, tables, pred, pt, restart) {
+  const W = frame.width, H = frame.height, C = frame.comps;
+  const out = new Uint16Array(W * H * C);
+  const len = bytes.length;
+  let pos = start;
+  let bitbuf = 0, bitcnt = 0;
+  const fill = () => {
+    while (bitcnt <= 24) {
+      let b = 0;
+      if (pos < len) {
+        b = bytes[pos];
+        if (b === 0xff) {
+          const nb = bytes[pos + 1];
+          if (nb === 0x00) { pos += 2; }
+          else { b = 0; } // marker: feed zeros, do not advance
+        } else pos++;
+      }
+      bitbuf = ((bitbuf << 8) | b) >>> 0;
+      bitcnt += 8;
+    }
+  };
+  const resetBits = () => {
+    bitbuf = 0; bitcnt = 0;
+    // skip to RSTn marker
+    while (pos < len - 1 && !(bytes[pos] === 0xff && bytes[pos + 1] >= 0xd0 && bytes[pos + 1] <= 0xd7)) pos++;
+    pos += 2;
+  };
+  const initPred = 1 << (frame.bits - pt - 1);
+  const rowLen = W * C;
+  const mask = 0xffff;
+  let mcuCount = 0;
+  let firstLine = true;
+  let lineStart = 0; // set when restart interval begins: next line is treated as first line
+  for (let y = 0; y < H; y++) {
+    const ro = y * rowLen;
+    for (let x = 0; x < W; x++) {
+      if (restart && mcuCount && mcuCount % restart === 0 && x === 0) {
+        resetBits();
+        firstLine = true;
+      }
+      for (let c = 0; c < C; c++) {
+        // Decode one difference.
+        if (bitcnt < 16) fill();
+        const lut = tables[c];
+        const v = lut[(bitbuf >>> (bitcnt - 16)) & 0xffff];
+        const l = v >> 8;
+        if (!l) throw new Error('ハフマン符号が不正です');
+        bitcnt -= l;
+        const ssss = v & 0xff;
+        let diff = 0;
+        if (ssss === 16) diff = -32768;
+        else if (ssss) {
+          if (bitcnt < ssss) fill();
+          let bits = (bitbuf >>> (bitcnt - ssss)) & ((1 << ssss) - 1);
+          bitcnt -= ssss;
+          diff = bits < (1 << (ssss - 1)) ? bits - (1 << ssss) + 1 : bits;
+        }
+        // Predict.
+        const i = ro + x * C + c;
+        let p;
+        if (firstLine) {
+          p = x === 0 ? initPred : out[i - C];
+        } else if (x === 0) {
+          p = out[i - rowLen];
+        } else {
+          const ra = out[i - C], rb = out[i - rowLen], rc = out[i - rowLen - C];
+          switch (pred) {
+            case 1: p = ra; break;
+            case 2: p = rb; break;
+            case 3: p = rc; break;
+            case 4: p = ra + rb - rc; break;
+            case 5: p = ra + ((rb - rc) >> 1); break;
+            case 6: p = rb + ((ra - rc) >> 1); break;
+            case 7: p = (ra + rb) >> 1; break;
+            default: p = ra;
+          }
+        }
+        out[i] = (p + diff) & mask;
+      }
+      mcuCount++;
+    }
+    firstLine = false;
+  }
+  if (pt) for (let i = 0; i < out.length; i++) out[i] <<= pt;
+  return { width: W, height: H, comps: C, bits: frame.bits, data: out };
+}
+
+// ---- DNG decoding: raw samples -> normalized linear camera RGB (Uint16, 0..65535) ----
+
+const XYZ_FROM_SRGB = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
+
+function mat3mul(a, b) {
+  const o = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  return o;
+}
+function mat3vec(m, v) { return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]; }
+function mat3inv(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  if (Math.abs(det) < 1e-12) return null;
+  const k = 1 / det;
+  return [A * k, -(b * i - c * h) * k, (b * f - c * e) * k, B * k, (a * i - c * g) * k, -(a * f - c * d) * k, C * k, -(a * h - b * g) * k, (a * e - b * d) * k];
+}
+function diag3(v) { return [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]; }
+
+function findRawIFD(r) {
+  let best = null;
+  for (const ifd of r.allIFDs()) {
+    const nsf = r.value(ifd, TAG.NewSubFileType, 0);
+    const ph = r.value(ifd, TAG.Photometric, 0);
+    if (nsf !== 0 || (ph !== 32803 && ph !== 34892)) continue;
+    const w = r.value(ifd, TAG.ImageWidth, 0), h = r.value(ifd, TAG.ImageLength, 0);
+    if (!best || w * h > best.w * best.h) best = { ifd, w, h, ph };
+  }
+  return best;
+}
+
+// Lightweight metadata read (no pixel decode).
+function readDNGInfo(buffer) {
+  const r = new TiffReader(buffer);
+  const ifd0 = r.ifds[0];
+  const raw = findRawIFD(r);
+  if (!raw) throw new Error('RAW画像データが見つかりません');
+  return {
+    isDNG: r.has(ifd0, TAG.DNGVersion),
+    make: r.value(ifd0, TAG.Make, ''), model: r.value(ifd0, TAG.Model, ''),
+    width: raw.w, height: raw.h, cfa: raw.ph === 32803,
+    compression: r.value(raw.ifd, TAG.Compression, 1),
+  };
+}
+
+async function decodeDNG(buffer, opts = {}) {
+  const r = new TiffReader(buffer);
+  const ifd0 = r.ifds[0];
+  if (!r.has(ifd0, TAG.DNGVersion)) throw new Error('DNGファイルではありません。カメラ固有のRAW(CR3/NEF/ARWなど)はAdobe DNG Converter等でDNGに変換してください');
+  const found = findRawIFD(r);
+  if (!found) throw new Error('RAW画像データが見つかりません');
+  const ifd = found.ifd;
+  const W = found.w, H = found.h;
+  const isCFA = found.ph === 32803;
+  const spp = r.value(ifd, TAG.SamplesPerPixel, 1);
+  const bps = r.value(ifd, TAG.BitsPerSample, 16);
+  const comp = r.value(ifd, TAG.Compression, 1);
+  if (r.value(ifd, TAG.PlanarConfig, 1) !== 1) throw new Error('プレーナ形式のDNGには未対応です');
+  if (!isCFA && spp !== 3) throw new Error('この形式のLinearRaw DNG(' + spp + 'チャンネル)には未対応です');
+  if (r.value(ifd, TAG.SampleFormat, 1) === 3) throw new Error('浮動小数点DNG(HDR合成DNGなど)には未対応です');
+
+  const raw = new Uint16Array(W * H * spp);
+  await readSamples(r, ifd, raw, W, H, spp, bps, comp);
+
+  // Linearization
+  const lin = r.values(ifd, TAG.LinearizationTable);
+  if (lin && lin.length) {
+    const n = lin.length - 1;
+    const lut = new Uint16Array(65536);
+    for (let i = 0; i < 65536; i++) lut[i] = lin[Math.min(i, n)];
+    for (let i = 0; i < raw.length; i++) raw[i] = lut[raw[i]];
+  }
+
+  // Active area
+  const aa = r.values(ifd, TAG.ActiveArea) || [0, 0, H, W];
+  const top = aa[0], left = aa[1], aw = aa[3] - aa[1], ah = aa[2] - aa[0];
+
+  // Black / white levels
+  const brd = r.values(ifd, TAG.BlackLevelRepeatDim) || [1, 1];
+  const brr = Math.max(1, brd[0]), brc = Math.max(1, brd[1]);
+  const blRaw = r.values(ifd, TAG.BlackLevel) || [0];
+  const bl = new Float64Array(brr * brc * spp);
+  for (let i = 0; i < bl.length; i++) bl[i] = blRaw[Math.min(i, blRaw.length - 1)];
+  const dH = r.values(ifd, TAG.BlackLevelDeltaH);
+  const dV = r.values(ifd, TAG.BlackLevelDeltaV);
+  const wlRaw = r.values(ifd, TAG.WhiteLevel) || [(1 << (lin ? 16 : bps)) - 1];
+  const wl = []; for (let s = 0; s < spp; s++) wl.push(wlRaw[Math.min(s, wlRaw.length - 1)]);
+
+  const norm = normalizeRaw(raw, W, top, left, aw, ah, spp, bl, brr, brc, dH, dV, wl);
+
+  // OpcodeList2 (gain maps for lens shading), applied to the normalized image
+  const op2 = r.bytes(ifd, TAG.OpcodeList2);
+  const warnings = [];
+  if (op2) applyOpcodeList(op2, norm, aw, ah, spp, warnings);
+
+  // Colour metadata
+  const meta = readColorMeta(r, ifd0, ifd, spp);
+  meta.make = r.value(ifd0, TAG.Make, '');
+  meta.model = r.value(ifd0, TAG.Model, '');
+  meta.uniqueModel = r.value(ifd0, TAG.UniqueCameraModel, '') || (meta.make + ' ' + meta.model).trim();
+  meta.orientation = r.value(ifd0, TAG.Orientation, 1);
+  meta.dateTime = r.value(ifd0, TAG.DateTime, '');
+  meta.warnings = warnings;
+
+  // Default crop, relative to active area
+  const dco = r.values(ifd, TAG.DefaultCropOrigin) || [0, 0];
+  const dcs = r.values(ifd, TAG.DefaultCropSize) || [aw, ah];
+  let crop = { x: Math.round(dco[0]), y: Math.round(dco[1]), w: Math.round(dcs[0]), h: Math.round(dcs[1]) };
+
+  let out, ow, oh;
+  if (isCFA) {
+    const pat = cfaPattern(r, ifd);
+    if (opts.half) { ({ out, ow, oh } = superpixel(norm, aw, ah, pat)); }
+    else { out = demosaicMHC(norm, aw, ah, pat); ow = aw; oh = ah; }
+  } else if (opts.half) {
+    ({ out, ow, oh } = halve3(norm, aw, ah));
+  } else { out = norm; ow = aw; oh = ah; }
+  if (opts.half) crop = { x: crop.x >> 1, y: crop.y >> 1, w: crop.w >> 1, h: crop.h >> 1 };
+  crop.x = Math.max(0, Math.min(crop.x, ow - 1)); crop.y = Math.max(0, Math.min(crop.y, oh - 1));
+  crop.w = Math.max(1, Math.min(crop.w, ow - crop.x)); crop.h = Math.max(1, Math.min(crop.h, oh - crop.y));
+  meta.crop = crop;
+  meta.cfa = isCFA;
+  meta.sourceWidth = aw; meta.sourceHeight = ah;
+  return { width: ow, height: oh, data: out, meta };
+}
+
+function normalizeRaw(raw, W, top, left, aw, ah, spp, bl, brr, brc, dH, dV, wl) {
+  const norm = new Uint16Array(aw * ah * spp);
+  for (let y = 0; y < ah; y++) {
+    const dv = dV ? dV[y] || 0 : 0;
+    const srow = ((y + top) * W + left) * spp;
+    const drow = y * aw * spp;
+    const by = (y % brr) * brc;
+    for (let x = 0; x < aw; x++) {
+      const dh = dH ? dH[x] || 0 : 0;
+      const bx = (by + (x % brc)) * spp;
+      for (let s = 0; s < spp; s++) {
+        const b = bl[bx + s] + dv + dh;
+        const sc = 65535 / Math.max(1, wl[s] - b);
+        const v = (raw[srow + x * spp + s] - b) * sc;
+        norm[drow + x * spp + s] = v <= 0 ? 0 : v >= 65535 ? 65535 : v + 0.5;
+      }
+    }
+  }
+  return norm;
+}
+
+function cfaPattern(r, ifd) {
+  const dim = r.values(ifd, TAG.CFARepeatPatternDim) || [2, 2];
+  const pat = r.values(ifd, TAG.CFAPattern);
+  const plane = r.values(ifd, TAG.CFAPlaneColor) || [0, 1, 2];
+  if (dim[0] !== 2 || dim[1] !== 2 || !pat || pat.length < 4) throw new Error('ベイヤー配列以外のセンサー(X-Transなど)には未対応です');
+  const p = pat.slice(0, 4).map((v) => plane[v]);
+  const counts = [0, 0, 0];
+  for (const c of p) { if (c > 2) throw new Error('RGB以外のカラーフィルタ配列には未対応です'); counts[c]++; }
+  if (counts[0] !== 1 || counts[1] !== 2 || counts[2] !== 1) throw new Error('対応していないカラーフィルタ配列です');
+  return p;
+}
+
+function readColorMeta(r, ifd0, rawIfd, spp) {
+  const get = (tag) => r.values(rawIfd, tag) || r.values(ifd0, tag);
+  const m = {
+    colorMatrix1: get(TAG.ColorMatrix1), colorMatrix2: get(TAG.ColorMatrix2),
+    illuminant1: (get(TAG.CalibrationIlluminant1) || [0])[0], illuminant2: (get(TAG.CalibrationIlluminant2) || [0])[0],
+    forwardMatrix1: get(TAG.ForwardMatrix1), forwardMatrix2: get(TAG.ForwardMatrix2),
+    cameraCalibration1: get(TAG.CameraCalibration1), cameraCalibration2: get(TAG.CameraCalibration2),
+    analogBalance: get(TAG.AnalogBalance), asShotNeutral: get(TAG.AsShotNeutral), asShotWhiteXY: get(TAG.AsShotWhiteXY),
+    baselineExposure: (get(TAG.BaselineExposure) || [0])[0],
+  };
+  for (const k of ['colorMatrix1', 'colorMatrix2', 'forwardMatrix1', 'forwardMatrix2', 'cameraCalibration1', 'cameraCalibration2']) {
+    if (m[k] && m[k].length !== 9) m[k] = null;
+  }
+  return m;
+}
+
+// Matrix taking white-balanced camera RGB to linear sRGB, plus WB multipliers.
+function renderTransform(meta) {
+  let cm = meta.colorMatrix1, cc = meta.cameraCalibration1;
+  if (meta.colorMatrix2 && (meta.illuminant2 === 21 || meta.illuminant2 === 23 || !meta.colorMatrix1)) { cm = meta.colorMatrix2; cc = meta.cameraCalibration2; }
+  if (!cm) cm = mat3inv(XYZ_FROM_SRGB); // no colour info: treat as sRGB
+  if (cc) cm = mat3mul(cc, cm);
+  if (meta.analogBalance && meta.analogBalance.length === 3) cm = mat3mul(diag3(meta.analogBalance), cm);
+  let n = meta.asShotNeutral && meta.asShotNeutral.length === 3 ? meta.asShotNeutral.slice() : null;
+  if (!n && meta.asShotWhiteXY) {
+    const [x, y] = meta.asShotWhiteXY;
+    n = mat3vec(cm, [x / y, 1, (1 - x - y) / y]);
+  }
+  if (!n || n.some((v) => !(v > 0))) n = mat3vec(cm, [0.95047, 1, 1.08883]);
+  const camFromRgb = mat3mul(cm, XYZ_FROM_SRGB);
+  for (let i = 0; i < 3; i++) {
+    const s = camFromRgb[i * 3] + camFromRgb[i * 3 + 1] + camFromRgb[i * 3 + 2];
+    for (let j = 0; j < 3; j++) camFromRgb[i * 3 + j] /= s || 1;
+  }
+  const rgbFromCam = mat3inv(camFromRgb) || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const mx = Math.max(n[0], n[1], n[2]);
+  const wb = n.map((v) => mx / v);
+  return { wb, matrix: rgbFromCam, baselineExposure: meta.baselineExposure || 0 };
+}
+
+async function readSamples(r, ifd, raw, W, H, spp, bps, comp) {
+  const tiled = r.has(ifd, TAG.TileOffsets);
+  let offs, counts, tw, th;
+  if (tiled) {
+    offs = r.values(ifd, TAG.TileOffsets); counts = r.values(ifd, TAG.TileByteCounts);
+    tw = r.value(ifd, TAG.TileWidth); th = r.value(ifd, TAG.TileLength);
+  } else {
+    offs = r.values(ifd, TAG.StripOffsets); counts = r.values(ifd, TAG.StripByteCounts);
+    tw = W; th = r.value(ifd, TAG.RowsPerStrip, H);
+    if (th > H) th = H;
+  }
+  if (!offs || !offs.length) throw new Error('画像データの位置情報がありません');
+  if (!counts) counts = offs.map((o, i) => (i + 1 < offs.length ? offs[i + 1] - o : r.buf.byteLength - o));
+  const across = Math.ceil(W / tw);
+  const u8 = new Uint8Array(r.buf);
+  const predictor = r.value(ifd, TAG.Predictor, 1);
+  for (let t = 0; t < offs.length; t++) {
+    const tx = (t % across) * tw, ty = Math.floor(t / across) * th;
+    if (ty >= H) break;
+    const bytes = u8.subarray(offs[t], Math.min(offs[t] + counts[t], u8.length));
+    const rows = tiled ? th : Math.min(th, H - ty);
+    let tile; // Uint16Array tw*rows*spp
+    if (comp === 1) {
+      tile = unpackBits(bytes, tw, rows, spp, bps, r.le);
+    } else if (comp === 7) {
+      const j = decodeLJ92(bytes);
+      tile = j.data;
+    } else if (comp === 8) {
+      const inflated = await inflate(bytes);
+      tile = unpackBits(inflated, tw, rows, spp, bps, r.le);
+      if (predictor === 2) {
+        for (let y = 0; y < rows; y++) for (let x = 1; x < tw; x++) for (let s = 0; s < spp; s++) {
+          const i = (y * tw + x) * spp + s; tile[i] = (tile[i] + tile[i - spp]) & 0xffff;
+        }
+      } else if (predictor !== 1) throw new Error('未対応の予測方式(Predictor ' + predictor + ')です');
+    } else if (comp === 34892 || comp === 52546) {
+      tile = await decodeLossyTile(bytes, tw, rows, spp);
+    } else {
+      throw new Error('未対応の圧縮形式です (Compression ' + comp + ')');
+    }
+    // Flat copy (LJ92 frames may have a different shape but the same sample order).
+    const rowSamples = tw * spp;
+    const maxRows = Math.min(rows, H - ty);
+    const copyW = Math.min(tw, W - tx) * spp;
+    for (let y = 0; y < maxRows; y++) {
+      const src = y * rowSamples;
+      if (src >= tile.length) break;
+      raw.set(tile.subarray(src, Math.min(src + copyW, tile.length)), ((ty + y) * W + tx) * spp);
+    }
+  }
+}
+
+function unpackBits(bytes, w, rows, spp, bps, le) {
+  const n = w * rows * spp;
+  const out = new Uint16Array(n);
+  if (bps === 16) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const m = Math.min(n, bytes.byteLength >> 1);
+    for (let i = 0; i < m; i++) out[i] = dv.getUint16(i * 2, le);
+  } else if (bps === 8) {
+    out.set(bytes.subarray(0, Math.min(n, bytes.length)));
+  } else if (bps < 16) {
+    const rowBits = w * spp * bps;
+    const rowBytes = (rowBits + 7) >> 3;
+    for (let y = 0; y < rows; y++) {
+      let p = y * rowBytes, acc = 0, cnt = 0;
+      const o = y * w * spp;
+      for (let x = 0; x < w * spp; x++) {
+        while (cnt < bps) { acc = ((acc << 8) | (bytes[p++] || 0)) & 0xffffff; cnt += 8; }
+        cnt -= bps;
+        out[o + x] = (acc >> cnt) & ((1 << bps) - 1);
+      }
+    }
+  } else throw new Error(bps + 'bitのデータには未対応です');
+  return out;
+}
+
+async function inflate(bytes) {
+  if (typeof DecompressionStream === 'undefined') throw new Error('このブラウザはDeflate圧縮DNGを展開できません');
+  const ds = new DecompressionStream('deflate');
+  const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+async function decodeLossyTile(bytes, tw, rows, spp) {
+  if (typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') throw new Error('このブラウザは非可逆圧縮DNGを展開できません');
+  let bmp;
+  try { bmp = await createImageBitmap(new Blob([bytes])); }
+  catch (e) { throw new Error('非可逆圧縮DNGのタイルを展開できませんでした(JPEG XL形式はiPhone/Safariのみ対応)'); }
+  const c = new OffscreenCanvas(bmp.width, bmp.height);
+  const g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  const px = g.getImageData(0, 0, bmp.width, bmp.height).data;
+  const out = new Uint16Array(tw * rows * spp);
+  for (let y = 0; y < Math.min(rows, bmp.height); y++) for (let x = 0; x < Math.min(tw, bmp.width); x++) for (let s = 0; s < spp; s++) {
+    out[(y * tw + x) * spp + s] = px[(y * bmp.width + x) * 4 + Math.min(s, 2)];
+  }
+  return out;
+}
+
+function applyOpcodeList(bytes, img, w, h, spp, warnings) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let p = 0;
+  const count = dv.getUint32(p); p += 4;
+  for (let k = 0; k < count && p + 16 <= bytes.length; k++) {
+    const id = dv.getUint32(p), flags = dv.getUint32(p + 8), size = dv.getUint32(p + 12);
+    const q = p + 16;
+    if (id === 9) {
+      const top = dv.getUint32(q), left = dv.getUint32(q + 4), bottom = dv.getUint32(q + 8), right = dv.getUint32(q + 12);
+      const plane = dv.getUint32(q + 16), planes = dv.getUint32(q + 20), rowPitch = dv.getUint32(q + 24), colPitch = dv.getUint32(q + 28);
+      const mpv = dv.getUint32(q + 32), mph = dv.getUint32(q + 36);
+      const msv = dv.getFloat64(q + 40), msh = dv.getFloat64(q + 48), mov = dv.getFloat64(q + 56), moh = dv.getFloat64(q + 64);
+      const mplanes = dv.getUint32(q + 72);
+      const gains = new Float32Array(mpv * mph * mplanes);
+      for (let i = 0; i < gains.length; i++) gains[i] = dv.getFloat32(q + 76 + i * 4);
+      for (let y = top; y < Math.min(bottom, h); y += Math.max(1, rowPitch)) {
+        let fy = ((y + 0.5) / h - mov) / (msv || 1);
+        fy = Math.max(0, Math.min(mpv - 1, fy));
+        const y0 = Math.min(mpv - 1, Math.floor(fy)), y1 = Math.min(mpv - 1, y0 + 1), wy = fy - y0;
+        for (let x = left; x < Math.min(right, w); x += Math.max(1, colPitch)) {
+          let fx = ((x + 0.5) / w - moh) / (msh || 1);
+          fx = Math.max(0, Math.min(mph - 1, fx));
+          const x0 = Math.min(mph - 1, Math.floor(fx)), x1 = Math.min(mph - 1, x0 + 1), wx = fx - x0;
+          for (let pl = plane; pl < Math.min(plane + planes, spp); pl++) {
+            const mp = Math.min(pl - plane, mplanes - 1);
+            const g00 = gains[(y0 * mph + x0) * mplanes + mp], g01 = gains[(y0 * mph + x1) * mplanes + mp];
+            const g10 = gains[(y1 * mph + x0) * mplanes + mp], g11 = gains[(y1 * mph + x1) * mplanes + mp];
+            const g = (g00 * (1 - wx) + g01 * wx) * (1 - wy) + (g10 * (1 - wx) + g11 * wx) * wy;
+            const i = (y * w + x) * spp + pl;
+            const v = img[i] * g;
+            img[i] = v >= 65535 ? 65535 : v + 0.5;
+          }
+        }
+      }
+    } else if (!(flags & 1) && id !== 1 /* WarpRectilinear: lens distortion, safe to skip for stacking */) {
+      warnings.push('DNG処理命令(Opcode ' + id + ')は適用していません');
+    }
+    p = q + size;
+  }
+}
+
+// Half-size, no interpolation: each 2x2 Bayer cell -> one RGB pixel.
+function superpixel(m, w, h, pat) {
+  const ow = w >> 1, oh = h >> 1;
+  const out = new Uint16Array(ow * oh * 3);
+  for (let y = 0; y < oh; y++) {
+    for (let x = 0; x < ow; x++) {
+      const a = (2 * y * w + 2 * x);
+      const v = [m[a], m[a + 1], m[a + w], m[a + w + 1]];
+      let r = 0, g = 0, b = 0;
+      for (let k = 0; k < 4; k++) { const c = pat[k]; if (c === 0) r = v[k]; else if (c === 2) b = v[k]; else g += v[k]; }
+      const o = (y * ow + x) * 3;
+      out[o] = r; out[o + 1] = (g + 1) >> 1; out[o + 2] = b;
+    }
+  }
+  return { out, ow, oh };
+}
+
+function halve3(m, w, h) {
+  const ow = w >> 1, oh = h >> 1;
+  const out = new Uint16Array(ow * oh * 3);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) for (let c = 0; c < 3; c++) {
+    const a = (2 * y * w + 2 * x) * 3 + c;
+    out[(y * ow + x) * 3 + c] = (m[a] + m[a + 3] + m[a + w * 3] + m[a + w * 3 + 3] + 2) >> 2;
+  }
+  return { out, ow, oh };
+}
+
+// Malvar-He-Cutler gradient-corrected bilinear demosaic.
+function demosaicMHC(m, w, h, pat) {
+  const P = 2, pw = w + 2 * P, ph = h + 2 * P;
+  const pad = new Int32Array(pw * ph);
+  const refl = (i, n) => (i < 0 ? -i : i >= n ? 2 * n - 2 - i : i);
+  for (let y = 0; y < ph; y++) {
+    const sy = refl(y - P, h);
+    for (let x = 0; x < pw; x++) pad[y * pw + x] = m[sy * w + refl(x - P, w)];
+  }
+  const out = new Uint16Array(w * h * 3);
+  const clamp = (v) => (v <= 0 ? 0 : v >= 65535 ? 65535 : v);
+  const s1 = pw, s2 = 2 * pw;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y + P) * pw + x + P;
+      const c = pat[((y & 1) << 1) | (x & 1)];
+      const o = (y * w + x) * 3;
+      const v = pad[i];
+      if (c === 1) {
+        // Green site: R/B from horizontal or vertical neighbours.
+        const horiz = (8 * 5 * v + 8 * 4 * (pad[i - 1] + pad[i + 1]) - 8 * (pad[i - 2] + pad[i + 2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - s2] + pad[i + s2])) / 64;
+        const vert = (8 * 5 * v + 8 * 4 * (pad[i - s1] + pad[i + s1]) - 8 * (pad[i - s2] + pad[i + s2] + pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) + 4 * (pad[i - 2] + pad[i + 2])) / 64;
+        const rowIsR = pat[((y & 1) << 1) | ((x + 1) & 1)] === 0;
+        out[o + 1] = v;
+        out[o] = clamp(rowIsR ? horiz : vert);
+        out[o + 2] = clamp(rowIsR ? vert : horiz);
+      } else {
+        const g = (4 * v + 2 * (pad[i - 1] + pad[i + 1] + pad[i - s1] + pad[i + s1]) - (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
+        const d = (6 * v + 2 * (pad[i - s1 - 1] + pad[i - s1 + 1] + pad[i + s1 - 1] + pad[i + s1 + 1]) - 1.5 * (pad[i - 2] + pad[i + 2] + pad[i - s2] + pad[i + s2])) / 8;
+        out[o + 1] = clamp(g);
+        if (c === 0) { out[o] = v; out[o + 2] = clamp(d); }
+        else { out[o + 2] = v; out[o] = clamp(d); }
+      }
+    }
+  }
+  return out;
+}
+
+// ---- Image alignment: similarity transform (scale, rotation, shift) by pyramidal Gauss-Newton ----
+// Transform params p = [a, b, tx, ty] in centred pixel coordinates of the small image:
+//   u = (1+a)X - bY + tx,  v = bX + (1+a)Y + ty   (maps reference coords -> moving coords)
+
+function downscaleLuma(img, w, h, k) {
+  const sw = Math.max(1, Math.floor(w / k)), sh = Math.max(1, Math.floor(h / k));
+  const out = new Float32Array(sw * sh);
+  const inv = 1 / (k * k * 4 * 65535);
+  for (let sy = 0; sy < sh; sy++) {
+    for (let sx = 0; sx < sw; sx++) {
+      let s = 0;
+      for (let y = sy * k; y < sy * k + k; y++) {
+        let o = (y * w + sx * k) * 3;
+        for (let x = 0; x < k; x++, o += 3) s += img[o] + 2 * img[o + 1] + img[o + 2];
+      }
+      out[sy * sw + sx] = Math.sqrt(s * inv);
+    }
+  }
+  return { data: out, w: sw, h: sh };
+}
+
+function half2(im) {
+  const w = im.w >> 1, h = im.h >> 1;
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const a = 2 * y * im.w + 2 * x;
+    out[y * w + x] = 0.25 * (im.data[a] + im.data[a + 1] + im.data[a + im.w] + im.data[a + im.w + 1]);
+  }
+  return { data: out, w, h };
+}
+
+function blur3(im) {
+  const { w, h, data } = im;
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const l = data[y * w + Math.max(0, x - 1)], c = data[y * w + x], r = data[y * w + Math.min(w - 1, x + 1)];
+    tmp[y * w + x] = 0.25 * l + 0.5 * c + 0.25 * r;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const u = tmp[Math.max(0, y - 1) * w + x], c = tmp[y * w + x], d = tmp[Math.min(h - 1, y + 1) * w + x];
+    out[y * w + x] = 0.25 * u + 0.5 * c + 0.25 * d;
+  }
+  return { data: out, w, h };
+}
+
+function standardize(im) {
+  let s = 0, s2 = 0;
+  const d = im.data, n = d.length;
+  for (let i = 0; i < n; i++) { s += d[i]; s2 += d[i] * d[i]; }
+  const m = s / n, sd = Math.sqrt(Math.max(1e-12, s2 / n - m * m));
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = (d[i] - m) / sd;
+  return { data: out, w: im.w, h: im.h };
+}
+
+function gradients(im) {
+  const { w, h, data } = im;
+  const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    gx[i] = 0.5 * (data[y * w + Math.min(w - 1, x + 1)] - data[y * w + Math.max(0, x - 1)]);
+    gy[i] = 0.5 * (data[Math.min(h - 1, y + 1) * w + x] - data[Math.max(0, y - 1) * w + x]);
+  }
+  return { gx, gy };
+}
+
+function solve4(H, b) {
+  const A = [0, 1, 2, 3].map((i) => [H[i * 4], H[i * 4 + 1], H[i * 4 + 2], H[i * 4 + 3], b[i]]);
+  for (let c = 0; c < 4; c++) {
+    let piv = c;
+    for (let r = c + 1; r < 4; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+    if (Math.abs(A[piv][c]) < 1e-12) return null;
+    [A[c], A[piv]] = [A[piv], A[c]];
+    for (let r = 0; r < 4; r++) if (r !== c) {
+      const f = A[r][c] / A[c][c];
+      for (let k = c; k < 5; k++) A[r][k] -= f * A[c][k];
+    }
+  }
+  return A.map((row, i) => row[4] / row[i]);
+}
+
+// Align moving image J to reference I (both {data,w,h} small luma). Returns params and a quality score.
+function alignPair(I0, J0, opts = {}) {
+  const levels = [];
+  let I = blur3(I0), J = blur3(J0);
+  for (let k = 1; k < (opts.preBlur || 1); k++) { I = blur3(I); J = blur3(J); }
+  levels.push([I, J]);
+  while (Math.min(I.w, I.h) >= 96 && levels.length < 6) { I = half2(I); J = half2(J); levels.push([I, J]); }
+  let p = [0, 0, 0, 0];
+  const scaleOnly = !!opts.noRotation;
+  for (let L = levels.length - 1; L >= 0; L--) {
+    if (L < levels.length - 1) { p[2] *= 2; p[3] *= 2; }
+    const Is = standardize(levels[L][0]), Js = standardize(levels[L][1]);
+    const { gx, gy } = gradients(Js);
+    const w = Is.w, h = Is.h, cx = (w - 1) / 2, cy = (h - 1) / 2;
+    const mx = Math.max(2, Math.round(w * 0.04)), my = Math.max(2, Math.round(h * 0.04));
+    const iters = L === 0 ? 12 : 25;
+    for (let it = 0; it < iters; it++) {
+      const Hm = new Float64Array(16), bv = new Float64Array(4);
+      const a1 = 1 + p[0], b = p[1];
+      let used = 0;
+      for (let y = my; y < h - my; y++) {
+        const Y = y - cy;
+        for (let x = mx; x < w - mx; x++) {
+          const X = x - cx;
+          const u = a1 * X - b * Y + p[2] + cx, v = b * X + a1 * Y + p[3] + cy;
+          if (u < 0 || v < 0 || u >= w - 1 || v >= h - 1) continue;
+          const x0 = u | 0, y0 = v | 0, fx = u - x0, fy = v - y0;
+          const i00 = y0 * w + x0, i01 = i00 + 1, i10 = i00 + w, i11 = i10 + 1;
+          const w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy;
+          const jv = Js.data[i00] * w00 + Js.data[i01] * w01 + Js.data[i10] * w10 + Js.data[i11] * w11;
+          const ix = gx[i00] * w00 + gx[i01] * w01 + gx[i10] * w10 + gx[i11] * w11;
+          const iy = gy[i00] * w00 + gy[i01] * w01 + gy[i10] * w10 + gy[i11] * w11;
+          const e = jv - Is.data[y * w + x];
+          const ae = Math.abs(e);
+          const rw = ae < 0.6 ? 1 : 0.6 / ae; // Huber
+          const g0 = ix * X + iy * Y, g1 = scaleOnly ? 0 : -ix * Y + iy * X;
+          const g = [g0, g1, ix, iy];
+          for (let r = 0; r < 4; r++) {
+            bv[r] += rw * g[r] * e;
+            for (let c = r; c < 4; c++) Hm[r * 4 + c] += rw * g[r] * g[c];
+          }
+          used++;
+        }
+      }
+      if (used < 50) break;
+      for (let r = 0; r < 4; r++) for (let c = 0; c < r; c++) Hm[r * 4 + c] = Hm[c * 4 + r];
+      if (scaleOnly) { Hm[5] = 1; Hm[1] = Hm[4] = Hm[6] = Hm[9] = Hm[7] = Hm[13] = 0; bv[1] = 0; }
+      const dp = solve4(Hm, bv);
+      if (!dp) break;
+      for (let k = 0; k < 4; k++) p[k] -= dp[k];
+      const r = Math.max(w, h) / 2;
+      if (Math.abs(dp[2]) < 0.005 && Math.abs(dp[3]) < 0.005 && Math.abs(dp[0]) * r < 0.005 && Math.abs(dp[1]) * r < 0.005) break;
+    }
+  }
+  return p;
+}
+
+// Convert small-image params into a full-resolution 2x3 affine (ref pixel -> moving pixel).
+function paramsToAffine(p, k, fullW, fullH, smallW, smallH) {
+  const a1 = 1 + p[0], b = p[1];
+  const cxs = (smallW - 1) / 2, cys = (smallH - 1) / 2;
+  const cxf = (cxs + 0.5) * k - 0.5, cyf = (cys + 0.5) * k - 0.5;
+  const tx = p[2] * k, ty = p[3] * k;
+  // u = a1(x-cxf) - b(y-cyf) + tx + cxf
+  return [a1, -b, cxf - a1 * cxf + b * cyf + tx, b, a1, cyf - b * cxf - a1 * cyf + ty];
+}
+
+function affineCompose(m2, m1) { // m2 ∘ m1
+  return [
+    m2[0] * m1[0] + m2[1] * m1[3], m2[0] * m1[1] + m2[1] * m1[4], m2[0] * m1[2] + m2[1] * m1[5] + m2[2],
+    m2[3] * m1[0] + m2[4] * m1[3], m2[3] * m1[1] + m2[4] * m1[4], m2[3] * m1[2] + m2[4] * m1[5] + m2[5],
+  ];
+}
+
+function affineInvert(m) {
+  const det = m[0] * m[4] - m[1] * m[3];
+  const a = m[4] / det, b = -m[1] / det, d = -m[3] / det, e = m[0] / det;
+  return [a, b, -(a * m[2] + b * m[5]), d, e, -(d * m[2] + e * m[5])];
+}
+
+function affineInfo(m, w, h) {
+  const scale = Math.sqrt(m[0] * m[4] - m[1] * m[3]);
+  const rot = Math.atan2(m[3], m[0]) * 180 / Math.PI;
+  const cx = (w - 1) / 2, cy = (h - 1) / 2;
+  const dx = m[0] * cx + m[1] * cy + m[2] - cx, dy = m[3] * cx + m[4] * cy + m[5] - cy;
+  return { scale, rot, dx, dy };
+}
+
+// ---- Focus stacking engine ----
+// Two passes over the frames so only one decoded frame is in memory at a time:
+//  1. decode, align to the previous frame, measure local sharpness -> depth index per cell
+//  2. decode again, blend each frame where it is the sharpest (soft weights per frame)
+
+function boxBlur(src, w, h, r, passes = 2) {
+  if (r <= 0) return src;
+  let a = src;
+  const tmp = new Float32Array(w * h);
+  const col = new Float64Array(w);
+  const norm = 1 / (2 * r + 1);
+  for (let p = 0; p < passes; p++) {
+    // horizontal: a -> tmp
+    for (let y = 0; y < h; y++) {
+      const o = y * w;
+      let s = 0;
+      for (let k = -r; k <= r; k++) s += a[o + (k < 0 ? 0 : k >= w ? w - 1 : k)];
+      for (let x = 0; x < w; x++) {
+        tmp[o + x] = s * norm;
+        const xa = x + r + 1, xr = x - r;
+        s += a[o + (xa >= w ? w - 1 : xa)] - a[o + (xr < 0 ? 0 : xr)];
+      }
+    }
+    // vertical with running column sums: tmp -> dst (row-major, cache friendly)
+    const dst = a === src ? new Float32Array(w * h) : a;
+    col.fill(0);
+    for (let k = -r; k <= r; k++) {
+      const o = (k < 0 ? 0 : k >= h ? h - 1 : k) * w;
+      for (let x = 0; x < w; x++) col[x] += tmp[o + x];
+    }
+    for (let y = 0; y < h; y++) {
+      const o = y * w;
+      for (let x = 0; x < w; x++) dst[o + x] = col[x] * norm;
+      const ya = y + r + 1, yr = y - r;
+      const oa = (ya >= h ? h - 1 : ya) * w, or = (yr < 0 ? 0 : yr) * w;
+      for (let x = 0; x < w; x++) col[x] += tmp[oa + x] - tmp[or + x];
+    }
+    a = dst;
+  }
+  return a;
+}
+
+// Sharpness energy per grid cell (cell = g x g pixels), in the frame's own coordinates.
+function focusEnergy(img, w, h, g) {
+  // sqrt-luma (roughly equalises shot noise), lightly smoothed, then squared Laplacian.
+  const L = new Float32Array(w * h);
+  const inv = 1 / (4 * 65535);
+  for (let i = 0, o = 0; i < w * h; i++, o += 3) L[i] = Math.sqrt((img[o] + 2 * img[o + 1] + img[o + 2]) * inv);
+  const gw = Math.floor(w / g), gh = Math.floor(h / g);
+  const E = new Float32Array(gw * gh);
+  const row = (y) => Math.min(h - 1, Math.max(0, y)) * w;
+  // Binomial-smoothed Laplacian computed row by row with a small ring of smoothed rows.
+  const S = [new Float32Array(w), new Float32Array(w), new Float32Array(w)];
+  const smoothRow = (y, out) => {
+    const r0 = row(y - 1), r1 = row(y), r2 = row(y + 1);
+    for (let x = 0; x < w; x++) {
+      const xl = Math.max(0, x - 1), xr = Math.min(w - 1, x + 1);
+      const c = L[r1 + x] * 4 + (L[r1 + xl] + L[r1 + xr] + L[r0 + x] + L[r2 + x]) * 2 + L[r0 + xl] + L[r0 + xr] + L[r2 + xl] + L[r2 + xr];
+      out[x] = c / 16;
+    }
+  };
+  smoothRow(-1, S[0]); smoothRow(0, S[1]);
+  const gi = 1 / (g * g);
+  for (let y = 0; y < gh * g; y++) {
+    smoothRow(y + 1, S[2]);
+    const up = S[0], mid = S[1], dn = S[2];
+    const ey = Math.floor(y / g) * gw;
+    for (let x = 0; x < gw * g; x++) {
+      const xl = Math.max(0, x - 1), xr = Math.min(w - 1, x + 1);
+      const lap = up[x] + dn[x] + mid[xl] + mid[xr] - 4 * mid[x];
+      E[ey + ((x / g) | 0)] += lap * lap * gi;
+    }
+    const t = S[0]; S[0] = S[1]; S[1] = S[2]; S[2] = t;
+  }
+  return { E, gw, gh };
+}
+
+// Sample a grid map defined in frame coordinates at reference grid positions via affine m (ref px -> frame px).
+function warpGrid(E, gw, gh, g, m, outW, outH) {
+  const out = new Float32Array(outW * outH);
+  for (let y = 0; y < outH; y++) {
+    const fy = (y + 0.5) * g - 0.5;
+    for (let x = 0; x < outW; x++) {
+      const fx = (x + 0.5) * g - 0.5;
+      const u = (m[0] * fx + m[1] * fy + m[2] + 0.5) / g - 0.5;
+      const v = (m[3] * fx + m[4] * fy + m[5] + 0.5) / g - 0.5;
+      const uc = Math.min(gw - 1.001, Math.max(0, u)), vc = Math.min(gh - 1.001, Math.max(0, v));
+      const x0 = uc | 0, y0 = vc | 0, ax = uc - x0, ay = vc - y0;
+      const i = y0 * gw + x0;
+      out[y * outW + x] = (E[i] * (1 - ax) + E[i + 1] * ax) * (1 - ay) + (E[i + gw] * (1 - ax) + E[i + gw + 1] * ax) * ay;
+    }
+  }
+  return out;
+}
+
+function median3u8(src, w, h) {
+  const out = new Uint8Array(src.length);
+  const v = new Int32Array(9);
+  const sw = (i, j) => { if (v[i] > v[j]) { const t = v[i]; v[i] = v[j]; v[j] = t; } };
+  for (let y = 0; y < h; y++) {
+    const r0 = (y > 0 ? y - 1 : 0) * w, r1 = y * w, r2 = (y < h - 1 ? y + 1 : y) * w;
+    for (let x = 0; x < w; x++) {
+      const xl = x > 0 ? x - 1 : 0, xr = x < w - 1 ? x + 1 : x;
+      v[0] = src[r0 + xl]; v[1] = src[r0 + x]; v[2] = src[r0 + xr];
+      v[3] = src[r1 + xl]; v[4] = src[r1 + x]; v[5] = src[r1 + xr];
+      v[6] = src[r2 + xl]; v[7] = src[r2 + x]; v[8] = src[r2 + xr];
+      // median-of-9 sorting network
+      sw(1, 2); sw(4, 5); sw(7, 8); sw(0, 1); sw(3, 4); sw(6, 7); sw(1, 2); sw(4, 5); sw(7, 8);
+      sw(0, 3); sw(5, 8); sw(4, 7); sw(3, 6); sw(1, 4); sw(2, 5); sw(4, 7); sw(4, 2); sw(6, 4); sw(4, 2);
+      out[r1 + x] = v[4];
+    }
+  }
+  return out;
+}
+
+const yieldTick = () => new Promise((r) => setTimeout(r, 0));
+
+function compositeFrame(out, CW, CH, x0, y0, img, W, H, m, wgt, gw, gh, g) {
+  for (let y = 0; y < CH; y++) {
+    const ry = y + y0;
+    const gyf = (ry + 0.5) / g - 0.5;
+    const gy0 = Math.min(gh - 1, Math.max(0, Math.floor(gyf))), gy1 = Math.min(gh - 1, gy0 + 1), ay = Math.min(1, Math.max(0, gyf - gy0));
+    const rowW0 = gy0 * gw, rowW1 = gy1 * gw;
+    for (let x = 0; x < CW; x++) {
+      const rx = x + x0;
+      const gxf = (rx + 0.5) / g - 0.5;
+      const gx0 = Math.min(gw - 1, Math.max(0, Math.floor(gxf))), gx1 = Math.min(gw - 1, gx0 + 1), ax = Math.min(1, Math.max(0, gxf - gx0));
+      const a = wgt[rowW0 + gx0], b = wgt[rowW0 + gx1], c = wgt[rowW1 + gx0], d = wgt[rowW1 + gx1];
+      if (a + b + c + d === 0) continue;
+      const wv = (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+      if (wv < 1e-4) continue;
+      let u = m[0] * rx + m[1] * ry + m[2], v = m[3] * rx + m[4] * ry + m[5];
+      u = Math.min(W - 1.001, Math.max(0, u)); v = Math.min(H - 1.001, Math.max(0, v));
+      const ux = u | 0, vy = v | 0, fx = u - ux, fy = v - vy;
+      const p00 = (vy * W + ux) * 3, p10 = p00 + W * 3;
+      const w00 = (1 - fx) * (1 - fy) * wv, w01 = fx * (1 - fy) * wv, w10 = (1 - fx) * fy * wv, w11 = fx * fy * wv;
+      const o = (y * CW + x) * 3;
+      for (let ch = 0; ch < 3; ch++) {
+        const s = img[p00 + ch] * w00 + img[p00 + 3 + ch] * w01 + img[p10 + ch] * w10 + img[p10 + 3 + ch] * w11;
+        const nv = out[o + ch] + s + 0.5;
+        out[o + ch] = nv > 65535 ? 65535 : nv;
+      }
+    }
+  }
+}
+
+function updateBest(Ew, best, idx, i) {
+  for (let j = 0; j < Ew.length; j++) if (i === 0 || Ew[j] > best[j]) { best[j] = Ew[j]; idx[j] = i; }
+}
+
+// frames: [{name, load: async () => ArrayBuffer}]
+// opts: {half, align, noRotation, detail (1..10), smooth (0..10)}
+async function runStack(frames, opts, progress = () => {}) {
+  const N = frames.length;
+  if (N < 2) throw new Error('2枚以上の画像を選んでください');
+  if (N > 255) throw new Error('一度に合成できるのは255枚までです');
+  const decodeOpts = { half: !!opts.half };
+  const t0 = Date.now();
+  let W = 0, H = 0, g = 1, gw = 0, gh = 0, refMeta = null;
+  let best = null, idx = null;
+  const affines = [];
+  const info = [];
+  let prevSmall = null, k = 1;
+  let prevAff = [1, 0, 0, 0, 1, 0];
+  const warnings = new Set();
+
+  for (let i = 0; i < N; i++) {
+    progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を読み込み中` });
+    await yieldTick();
+    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    (dec.meta.warnings || []).forEach((w) => warnings.add(w));
+    if (i === 0) {
+      if (opts.onFirstFrame) opts.onFirstFrame(dec);
+      W = dec.width; H = dec.height; refMeta = dec.meta;
+      g = W * H > 6e6 ? 2 : 1;
+      gw = Math.floor(W / g); gh = Math.floor(H / g);
+      best = new Float32Array(gw * gh); idx = new Uint8Array(gw * gh);
+      k = Math.max(1, Math.ceil(Math.max(W, H) / 720));
+    } else if (dec.width !== W || dec.height !== H) {
+      throw new Error(`${frames[i].name} の画像サイズ(${dec.width}×${dec.height})が1枚目(${W}×${H})と異なります`);
+    }
+    progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を位置合わせ中` });
+    await yieldTick();
+    const small = downscaleLuma(dec.data, W, H, k);
+    let aff = [1, 0, 0, 0, 1, 0];
+    if (i > 0 && opts.align !== false) {
+      const p = alignPair(prevSmall, small, { noRotation: opts.noRotation });
+      const rel = paramsToAffine(p, k, W, H, small.w, small.h);
+      const ri = affineInfo(rel, W, H);
+      if (Math.abs(ri.scale - 1) > 0.12 || Math.abs(ri.dx) > W * 0.2 || Math.abs(ri.dy) > H * 0.2 || Math.abs(ri.rot) > 8) {
+        warnings.add(`${frames[i].name} の位置合わせに失敗したため、補正せずに合成しました`);
+        aff = prevAff;
+      } else {
+        aff = affineCompose(rel, prevAff);
+      }
+    }
+    prevSmall = small; prevAff = aff;
+    affines.push(aff);
+    info.push({ name: frames[i].name, ...affineInfo(aff, W, H) });
+
+    progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目のピントを解析中` });
+    await yieldTick();
+    const fe = focusEnergy(dec.data, W, H, g);
+    let Eb = boxBlur(fe.E, fe.gw, fe.gh, Math.max(1, Math.round(opts.detail || 3)), 2);
+    const isIdentity = aff[0] === 1 && aff[1] === 0 && aff[2] === 0 && aff[3] === 0 && aff[4] === 1 && aff[5] === 0;
+    const Ew = isIdentity ? Eb : warpGrid(Eb, fe.gw, fe.gh, g, aff, gw, gh);
+    updateBest(Ew, best, idx, i);
+  }
+
+  // Depth map clean-up: low-confidence cells take the (energy-weighted) depth of their neighbourhood.
+  progress({ phase: 2, frame: 0, total: N, text: '深度マップを整えています' });
+  await yieldTick();
+  const sorted = Float32Array.from(best).sort();
+  const tau = Math.max(1e-12, sorted[Math.floor(sorted.length * 0.1)] * 4);
+  const num = new Float32Array(gw * gh), den = new Float32Array(gw * gh);
+  for (let j = 0; j < gw * gh; j++) { num[j] = idx[j] * best[j]; den[j] = best[j]; }
+  const fillR = Math.max(4, Math.round(Math.max(gw, gh) / 40));
+  const nb = boxBlur(num, gw, gh, fillR, 2), db = boxBlur(den, gw, gh, fillR, 2);
+  for (let j = 0; j < gw * gh; j++) {
+    if (best[j] < tau && db[j] > 0) idx[j] = Math.min(N - 1, Math.max(0, Math.round(nb[j] / db[j])));
+  }
+  idx = median3u8(idx, gw, gh);
+
+  // Common area covered by every frame (in reference coords), intersected with the default crop.
+  let x0 = refMeta.crop.x, y0 = refMeta.crop.y, x1 = refMeta.crop.x + refMeta.crop.w, y1 = refMeta.crop.y + refMeta.crop.h;
+  for (const m of affines) {
+    const inv = affineInvert(m);
+    const P = (x, y) => [inv[0] * x + inv[1] * y + inv[2], inv[3] * x + inv[4] * y + inv[5]];
+    const tl = P(0, 0), tr = P(W - 1, 0), bl = P(0, H - 1), br = P(W - 1, H - 1);
+    x0 = Math.max(x0, Math.ceil(Math.max(tl[0], bl[0])));
+    x1 = Math.min(x1, Math.floor(Math.min(tr[0], br[0])) + 1);
+    y0 = Math.max(y0, Math.ceil(Math.max(tl[1], tr[1])));
+    y1 = Math.min(y1, Math.floor(Math.min(bl[1], br[1])) + 1);
+  }
+  x0 += x0 & 1; y0 += y0 & 1;
+  const CW = Math.max(2, (x1 - x0) & ~1), CH = Math.max(2, (y1 - y0) & ~1);
+
+  // Pass 2: blend.
+  const share = new Float64Array(N);
+  for (let j = 0; j < gw * gh; j++) share[idx[j]]++;
+  const out = new Uint16Array(CW * CH * 3);
+  const smoothR = Math.max(0, Math.round(opts.smooth ?? 2));
+  const used = [];
+  for (let i = 0; i < N; i++) if (share[i] > 0) used.push(i);
+  for (let ui = 0; ui < used.length; ui++) {
+    const i = used[ui];
+    progress({ phase: 2, frame: ui, total: used.length, text: `合成中 ${ui + 1}/${used.length}（${frames[i].name}）` });
+    await yieldTick();
+    const ind = new Float32Array(gw * gh);
+    for (let j = 0; j < gw * gh; j++) ind[j] = idx[j] === i ? 1 : 0;
+    const wgt = smoothR ? boxBlur(ind, gw, gh, smoothR, 2) : ind;
+    // Dilate a 1-cell mask of where this frame contributes, to skip pixels quickly.
+    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g);
+  }
+  const total = gw * gh;
+  info.forEach((f, i) => { f.share = share[i] / total; });
+  return {
+    width: CW, height: CH, data: out, meta: refMeta,
+    depth: { data: idx, w: gw, h: gh, g, x0, y0 },
+    frames: info, warnings: [...warnings], seconds: (Date.now() - t0) / 1000,
+  };
+}
+
+// ---- Rendering and file writers ----
+
+function srgbEncode(x) { return x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055; }
+
+// Tone LUT over linear values 0..8 (after exposure): soft highlight shoulder, then sRGB.
+function makeToneLUT(bits) {
+  const N = 8192, maxV = (1 << bits) - 1, t = 0.8;
+  const lut = bits > 8 ? new Uint16Array(N + 1) : new Uint8Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    let x = (i / N) * 8;
+    if (x > t) x = t + (1 - t) * (1 - Math.exp(-(x - t) / (1 - t)));
+    lut[i] = Math.round(srgbEncode(Math.min(1, x)) * maxV);
+  }
+  return lut;
+}
+
+// Camera RGB (Uint16) -> display-referred sRGB; optional downscale (box) to fit maxSide.
+// Returns {data, w, h} with 3 (bits 16) or 4 (bits 8, RGBA) channels.
+function renderImage(src, w, h, rt, opts = {}) {
+  const bits = opts.bits || 8;
+  const step = Math.max(1, Math.ceil(Math.max(w, h) / (opts.maxSide || Infinity)));
+  const ow = Math.floor(w / step), oh = Math.floor(h / step);
+  const ch = bits === 8 ? 4 : 3;
+  const out = bits === 8 ? new Uint8ClampedArray(ow * oh * 4) : new Uint16Array(ow * oh * 3);
+  const lut = makeToneLUT(bits);
+  const gain = Math.pow(2, (rt.baselineExposure || 0) + (opts.exposure || 0));
+  const M = rt.matrix.map((v) => v * gain);
+  const wb = rt.wb;
+  const N = 8192 / 8, inv = 1 / (65535 * step * step);
+  for (let y = 0; y < oh; y++) {
+    for (let x = 0; x < ow; x++) {
+      let r = 0, gg = 0, b = 0;
+      for (let sy = 0; sy < step; sy++) {
+        let o = ((y * step + sy) * w + x * step) * 3;
+        for (let sx = 0; sx < step; sx++, o += 3) { r += src[o]; gg += src[o + 1]; b += src[o + 2]; }
+      }
+      r = Math.min(1, r * inv * wb[0]); gg = Math.min(1, gg * inv * wb[1]); b = Math.min(1, b * inv * wb[2]);
+      const R = M[0] * r + M[1] * gg + M[2] * b, G = M[3] * r + M[4] * gg + M[5] * b, B = M[6] * r + M[7] * gg + M[8] * b;
+      const o = (y * ow + x) * ch;
+      out[o] = lut[Math.min(8192, Math.max(0, (R * N) | 0))];
+      out[o + 1] = lut[Math.min(8192, Math.max(0, (G * N) | 0))];
+      out[o + 2] = lut[Math.min(8192, Math.max(0, (B * N) | 0))];
+      if (ch === 4) out[o + 3] = 255;
+    }
+  }
+  return orient(out, ow, oh, ch, opts.orientation || 1);
+}
+
+// Apply EXIF orientation physically.
+function orient(src, w, h, ch, o) {
+  if (!o || o === 1) return { data: src, w, h };
+  const swap = o >= 5;
+  const ow = swap ? h : w, oh = swap ? w : h;
+  const out = new src.constructor(src.length);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+    let sx, sy;
+    switch (o) {
+      case 2: sx = w - 1 - x; sy = y; break;
+      case 3: sx = w - 1 - x; sy = h - 1 - y; break;
+      case 4: sx = x; sy = h - 1 - y; break;
+      case 5: sx = y; sy = x; break;
+      case 6: sx = y; sy = h - 1 - x; break;
+      case 7: sx = w - 1 - y; sy = h - 1 - x; break;
+      case 8: sx = w - 1 - y; sy = x; break;
+      default: sx = x; sy = y;
+    }
+    const si = (sy * w + sx) * ch, di = (y * ow + x) * ch;
+    for (let c = 0; c < ch; c++) out[di + c] = src[si + c];
+  }
+  return { data: out, w: ow, h: oh };
+}
+
+function u16Strips(data, w, h, spp, rowsPerStrip) {
+  const strips = [];
+  for (let y = 0; y < h; y += rowsPerStrip) {
+    const rows = Math.min(rowsPerStrip, h - y);
+    const part = data.subarray(y * w * spp, (y + rows) * w * spp);
+    // Little-endian hosts: the typed array bytes are already LE.
+    strips.push(new Uint8Array(part.buffer.slice(part.byteOffset, part.byteOffset + part.byteLength)));
+  }
+  return strips;
+}
+
+// Linear (demosaiced) DNG in the camera's colour space, so raw editors keep full WB / colour control.
+function writeLinearDNG(data, w, h, meta, extra = {}) {
+  const e = [];
+  const add = (tag, type, values) => { if (values != null && (typeof values === 'string' || values.length)) e.push({ tag, type, values }); };
+  add(TAG.NewSubFileType, 4, [0]);
+  add(TAG.ImageWidth, 4, [w]);
+  add(TAG.ImageLength, 4, [h]);
+  add(TAG.BitsPerSample, 3, [16, 16, 16]);
+  add(TAG.Compression, 3, [1]);
+  add(TAG.Photometric, 3, [34892]);
+  if (meta.make) add(TAG.Make, 2, meta.make);
+  if (meta.model) add(TAG.Model, 2, meta.model);
+  add(TAG.Orientation, 3, [meta.orientation || 1]);
+  add(TAG.SamplesPerPixel, 3, [3]);
+  const rps = Math.max(1, Math.floor(262144 / (w * 6)));
+  add(TAG.RowsPerStrip, 4, [rps]);
+  add(TAG.PlanarConfig, 3, [1]);
+  add(TAG.Software, 2, extra.software || 'RAW Focus Stacker');
+  if (meta.dateTime) add(TAG.DateTime, 2, meta.dateTime);
+  add(TAG.DNGVersion, 1, [1, 4, 0, 0]);
+  add(TAG.DNGBackwardVersion, 1, [1, 1, 0, 0]);
+  add(TAG.UniqueCameraModel, 2, meta.uniqueModel || 'Focus stack');
+  add(TAG.WhiteLevel, 4, [65535, 65535, 65535]);
+  add(TAG.BlackLevel, 3, [0, 0, 0]);
+  const cm1 = meta.colorMatrix1 || mat3inv(XYZ_FROM_SRGB);
+  add(TAG.ColorMatrix1, 10, cm1);
+  add(TAG.CalibrationIlluminant1, 3, [meta.colorMatrix1 ? meta.illuminant1 || 21 : 21]);
+  if (meta.colorMatrix2) { add(TAG.ColorMatrix2, 10, meta.colorMatrix2); add(TAG.CalibrationIlluminant2, 3, [meta.illuminant2 || 21]); }
+  if (meta.forwardMatrix1) add(TAG.ForwardMatrix1, 10, meta.forwardMatrix1);
+  if (meta.forwardMatrix2 && meta.colorMatrix2) add(TAG.ForwardMatrix2, 10, meta.forwardMatrix2);
+  if (meta.cameraCalibration1) add(TAG.CameraCalibration1, 10, meta.cameraCalibration1);
+  if (meta.cameraCalibration2 && meta.colorMatrix2) add(TAG.CameraCalibration2, 10, meta.cameraCalibration2);
+  if (meta.analogBalance) add(TAG.AnalogBalance, 5, meta.analogBalance);
+  if (meta.asShotNeutral) add(TAG.AsShotNeutral, 5, meta.asShotNeutral);
+  else if (meta.asShotWhiteXY) add(TAG.AsShotWhiteXY, 5, meta.asShotWhiteXY);
+  add(TAG.BaselineExposure, 10, [meta.baselineExposure || 0]);
+  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+}
+
+// 16-bit sRGB TIFF from rendered data (3 channels).
+function writeTiff16(data, w, h, software) {
+  const rps = Math.max(1, Math.floor(262144 / (w * 6)));
+  const e = [
+    { tag: TAG.ImageWidth, type: 4, values: [w] }, { tag: TAG.ImageLength, type: 4, values: [h] },
+    { tag: TAG.BitsPerSample, type: 3, values: [16, 16, 16] }, { tag: TAG.Compression, type: 3, values: [1] },
+    { tag: TAG.Photometric, type: 3, values: [2] }, { tag: TAG.SamplesPerPixel, type: 3, values: [3] },
+    { tag: TAG.RowsPerStrip, type: 4, values: [rps] }, { tag: TAG.PlanarConfig, type: 3, values: [1] },
+    { tag: TAG.Software, type: 2, values: software || 'RAW Focus Stacker' },
+    { tag: 282, type: 5, values: [300] }, { tag: 283, type: 5, values: [300] }, { tag: 296, type: 3, values: [2] },
+  ];
+  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+}
+
+// ---- ZIP (store only) ----
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xffffffff;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function makeZip(files) { // [{name, data: Uint8Array}] -> Blob
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint16(8, 0, true); lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, f.data.length, true); lh.setUint32(22, f.data.length, true);
+    lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), name, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+    ch.setUint16(10, 0, true); ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, f.data.length, true); ch.setUint32(24, f.data.length, true);
+    ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + f.data.length;
+  }
+  const csize = central.reduce((s, p) => s + p.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, csize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+}
+
+// ---- Synthetic focus bracket (for the built-in sample and tests) ----
+// Renders layered textured objects at different depths, blurs each layer according to the
+// focus position of each frame, adds slight focus breathing and noise, and stores Bayer DNGs.
+function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
+  let s = seed >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const noiseTex = (cell) => {
+    const gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+    const g = new Float32Array(gw * gh).map(() => rnd());
+    return (x, y) => {
+      const fx = x / cell, fy = y / cell, xi = Math.floor(fx), yi = Math.floor(fy), ax = fx - xi, ay = fy - yi;
+      const x0 = ((xi % (gw - 1)) + gw - 1) % (gw - 1), y0 = ((yi % (gh - 1)) + gh - 1) % (gh - 1);
+      const i = y0 * gw + x0;
+      return (g[i] * (1 - ax) + g[i + 1] * ax) * (1 - ay) + (g[i + gw] * (1 - ax) + g[i + gw + 1] * ax) * ay;
+    };
+  };
+  const n1 = noiseTex(3), n2 = noiseTex(11), n3 = noiseTex(37);
+  // Layers from far (index 0) to near. depth in "frame units".
+  // Object placement varies with the seed so each sample looks different.
+  const j = () => (rnd() - 0.5) * 0.12;
+  const ex = 0.70 + j(), ey = 0.42 + j(), rx = 0.40 + j(), ry = 0.55 + j(), cx0 = 0.17 + j() * 0.5, cy0 = 0.70 + j();
+  const layers = [
+    { depth: n - 0.6, color: [0.10, 0.22, 0.12], shape: () => 1, tex: (x, y) => 0.25 + 0.5 * n2(x, y) + 0.35 * n1(x * 0.7, y * 0.7) * n3(x, y) },
+    { depth: n * 0.62, color: [0.55, 0.32, 0.12], shape: (x, y) => ((x - W * ex) ** 2 / (W * 0.20) ** 2 + (y - H * ey) ** 2 / (H * 0.36) ** 2) < 1, tex: (x, y) => 0.3 + 0.7 * n1(x, y) * (0.5 + 0.5 * n2(x * 2, y * 2)) },
+    { depth: n * 0.32, color: [0.75, 0.62, 0.20], shape: (x, y) => Math.abs(x - W * rx) < W * 0.12 && Math.abs(y - H * ry) < H * 0.32, tex: (x, y) => ((Math.floor(x / 6) + Math.floor(y / 6)) & 1 ? 1 : 0.35) * (0.7 + 0.3 * n3(x, y)) },
+    { depth: 0.2, color: [0.62, 0.18, 0.28], shape: (x, y) => ((x - W * cx0) ** 2 + (y - H * cy0) ** 2) < (H * 0.20) ** 2, tex: (x, y) => 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(Math.hypot(x - W * cx0, y - H * cy0) * 0.6)) * n1(x * 1.3, y * 1.3) },
+  ];
+  // Pre-render each layer's colour (premultiplied) and alpha.
+  const L = layers.map((ly) => {
+    const a = new Float32Array(W * H), c = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!ly.shape(x, y)) continue;
+      a[i] = 1;
+      const t = ly.tex(x, y);
+      for (let k = 0; k < 3; k++) c[k][i] = ly.color[k] * (0.25 + 1.1 * t);
+    }
+    return { ly, a, c };
+  });
+  const neutral = [0.52, 1, 0.68];
+  const cm = mat3mul(diag3(neutral), mat3inv(XYZ_FROM_SRGB));
+  const black = 256, white = 16383;
+  const files = [];
+  for (let f = 0; f < n; f++) {
+    // composite back to front with per-layer defocus blur
+    const R = new Float32Array(W * H), G = new Float32Array(W * H), B = new Float32Array(W * H);
+    const acc = [R, G, B];
+    for (const { ly, a, c } of L) {
+      const rad = Math.round(Math.abs(ly.depth - f) * blurK);
+      const ab = rad ? boxBlur(a, W, H, rad, 3) : a;
+      for (let k = 0; k < 3; k++) {
+        const cb = rad ? boxBlur(c[k], W, H, rad, 3) : c[k];
+        const dst = acc[k];
+        for (let i = 0; i < W * H; i++) dst[i] = dst[i] * (1 - ab[i]) + cb[i];
+      }
+    }
+    // focus breathing: magnify around centre
+    const sc = 1 + 0.006 * f, dx = 0.8 * f, dy = -0.5 * f;
+    const mosaic = new Uint16Array(W * H);
+    const cx = W / 2, cy = H / 2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = Math.min(W - 1.001, Math.max(0, (x - cx) / sc + cx + dx)), v = Math.min(H - 1.001, Math.max(0, (y - cy) / sc + cy + dy));
+      const x0 = u | 0, y0 = v | 0, ax = u - x0, ay = v - y0, i = y0 * W + x0;
+      const ch = (y & 1) === 0 ? ((x & 1) === 0 ? 0 : 1) : ((x & 1) === 0 ? 1 : 2);
+      const src = acc[ch];
+      const lin = (src[i] * (1 - ax) + src[i + 1] * ax) * (1 - ay) + (src[i + W] * (1 - ax) + src[i + W + 1] * ax) * ay;
+      const cam = Math.max(0, lin * neutral[ch] * 0.8);
+      const val = black + cam * (white - black);
+      const noisy = val + (rnd() + rnd() + rnd() - 1.5) * Math.sqrt(val * 0.6 + 40);
+      mosaic[y * W + x] = Math.max(0, Math.min(white, Math.round(noisy)));
+    }
+    const e = [
+      { tag: TAG.NewSubFileType, type: 4, values: [0] }, { tag: TAG.ImageWidth, type: 4, values: [W] },
+      { tag: TAG.ImageLength, type: 4, values: [H] }, { tag: TAG.BitsPerSample, type: 3, values: [16] },
+      { tag: TAG.Compression, type: 3, values: [1] }, { tag: TAG.Photometric, type: 3, values: [32803] },
+      { tag: TAG.Make, type: 2, values: 'Sample' }, { tag: TAG.Model, type: 2, values: 'Synthetic bracket' },
+      { tag: TAG.Orientation, type: 3, values: [1] }, { tag: TAG.SamplesPerPixel, type: 3, values: [1] },
+      { tag: TAG.RowsPerStrip, type: 4, values: [H] }, { tag: TAG.PlanarConfig, type: 3, values: [1] },
+      { tag: TAG.CFARepeatPatternDim, type: 3, values: [2, 2] }, { tag: TAG.CFAPattern, type: 1, values: [0, 1, 1, 2] },
+      { tag: TAG.DNGVersion, type: 1, values: [1, 4, 0, 0] }, { tag: TAG.UniqueCameraModel, type: 2, values: 'Synthetic bracket' },
+      { tag: TAG.CFAPlaneColor, type: 1, values: [0, 1, 2] }, { tag: TAG.CFALayout, type: 3, values: [1] },
+      { tag: TAG.BlackLevel, type: 3, values: [black] }, { tag: TAG.WhiteLevel, type: 3, values: [white] },
+      { tag: TAG.ColorMatrix1, type: 10, values: cm }, { tag: TAG.CalibrationIlluminant1, type: 3, values: [21] },
+      { tag: TAG.AsShotNeutral, type: 5, values: neutral }, { tag: TAG.BaselineExposure, type: 10, values: [0.3] },
+    ];
+    files.push({ name: `sample_${String(f + 1).padStart(2, '0')}.dng`, data: writeTiff(e, [new Uint8Array(mosaic.buffer)]) });
+  }
+  return files;
+}
+
+// ---- Worker message handling ----
+const DEPTH_COLORS = [[38, 70, 83], [42, 157, 143], [138, 177, 125], [233, 196, 106], [244, 162, 97], [231, 111, 81], [190, 60, 90]];
+function depthColor(t) {
+  const p = t * (DEPTH_COLORS.length - 1), i = Math.min(DEPTH_COLORS.length - 2, Math.floor(p)), f = p - i;
+  const a = DEPTH_COLORS[i], b = DEPTH_COLORS[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+const state = { result: null, rt: null, names: [] };
+
+function renderDepth(res, maxSide) {
+  const { depth, width, height } = res;
+  const n = res.frames.length;
+  const step = Math.max(1, Math.ceil(Math.max(width, height) / maxSide));
+  const ow = Math.floor(width / step), oh = Math.floor(height / step);
+  const out = new Uint8ClampedArray(ow * oh * 4);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+    const gx = Math.min(depth.w - 1, Math.floor((x * step + depth.x0) / depth.g));
+    const gy = Math.min(depth.h - 1, Math.floor((y * step + depth.y0) / depth.g));
+    const c = depthColor(n > 1 ? depth.data[gy * depth.w + gx] / (n - 1) : 0);
+    const o = (y * ow + x) * 4;
+    out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = 255;
+  }
+  return orient(out, ow, oh, 4, res.meta.orientation || 1);
+}
+
+function cropRegion(res, cx, cy, size) {
+  // cx, cy: 0..1 in the oriented preview. Convert to stored (unoriented) coords.
+  const o = res.meta.orientation || 1;
+  let u = cx, v = cy;
+  switch (o) {
+    case 2: u = 1 - cx; break;
+    case 3: u = 1 - cx; v = 1 - cy; break;
+    case 4: v = 1 - cy; break;
+    case 5: u = cy; v = cx; break;
+    case 6: u = cy; v = 1 - cx; break;
+    case 7: u = 1 - cy; v = 1 - cx; break;
+    case 8: u = 1 - cy; v = cx; break;
+  }
+  const W = res.width, H = res.height;
+  const s = Math.min(size, W, H);
+  const x0 = Math.max(0, Math.min(W - s, Math.round(u * W - s / 2)));
+  const y0 = Math.max(0, Math.min(H - s, Math.round(v * H - s / 2)));
+  const sub = new Uint16Array(s * s * 3);
+  for (let y = 0; y < s; y++) sub.set(res.data.subarray(((y0 + y) * W + x0) * 3, ((y0 + y) * W + x0 + s) * 3), y * s * 3);
+  return { data: sub, w: s, h: s };
+}
+
+// First frame, cropped to the same area as the result, for before/after comparison.
+function renderFirst(res, exposure) {
+  const f = state.first;
+  if (!f) return null;
+  const x0 = Math.floor(res.depth.x0 / f.step), y0 = Math.floor(res.depth.y0 / f.step);
+  const cw = Math.min(f.w - x0, Math.floor(res.width / f.step)), chh = Math.min(f.h - y0, Math.floor(res.height / f.step));
+  if (cw < 2 || chh < 2) return null;
+  const sub = new Uint16Array(cw * chh * 3);
+  for (let y = 0; y < chh; y++) sub.set(f.data.subarray(((y0 + y) * f.w + x0) * 3, ((y0 + y) * f.w + x0 + cw) * 3), y * cw * 3);
+  const r = renderImage(sub, cw, chh, state.rt, { exposure, orientation: res.meta.orientation });
+  return { data: r.data, w: r.w, h: r.h };
+}
+
+function stamp() {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+async function encodeJPEG(img) {
+  if (typeof OffscreenCanvas === 'undefined') return null;
+  const c = new OffscreenCanvas(img.w, img.h);
+  const g = c.getContext('2d');
+  g.putImageData(new ImageData(img.data, img.w, img.h), 0, 0);
+  const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.93 });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function handleMessage(msg, post) {
+  try {
+    if (msg.type === 'ping') {
+      post({ type: 'pong' });
+    } else if (msg.type === 'info') {
+      const buf = await msg.file.arrayBuffer();
+      const info = readDNGInfo(buf);
+      post({ type: 'info', id: msg.id, info });
+    } else if (msg.type === 'run') {
+      state.result = null;
+      let frames;
+      if (msg.demo) {
+        post({ type: 'progress', phase: 0, frame: 0, total: 1, text: 'サンプルのRAWデータを作成中' });
+        const files = makeDemoStack(5, 720, 480, msg.seed || 11);
+        frames = files.map((f) => ({ name: f.name, load: async () => f.data.buffer.slice(0) }));
+      } else {
+        frames = msg.files.map((f) => ({ name: f.name, load: () => f.arrayBuffer() }));
+      }
+      const pvSize = msg.previewSize || 1600;
+      let first = null;
+      const opts = Object.assign({}, msg.opts, {
+        onFirstFrame: (dec) => {
+          const step = Math.max(1, Math.floor(Math.max(dec.width, dec.height) / pvSize));
+          const sw = Math.floor(dec.width / step), sh = Math.floor(dec.height / step);
+          const d = new Uint16Array(sw * sh * 3);
+          for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) for (let c = 0; c < 3; c++) {
+            let s = 0;
+            for (let yy = 0; yy < step; yy++) for (let xx = 0; xx < step; xx++) s += dec.data[((y * step + yy) * dec.width + x * step + xx) * 3 + c];
+            d[(y * sw + x) * 3 + c] = s / (step * step);
+          }
+          first = { data: d, w: sw, h: sh, step };
+        },
+      });
+      const res = await runStack(frames, opts, (p) => post({ type: 'progress', ...p }));
+      state.first = first;
+      state.result = res;
+      state.rt = renderTransform(res.meta);
+      const pv = renderImage(res.data, res.width, res.height, state.rt, { maxSide: msg.previewSize || 1600, exposure: msg.exposure || 0, orientation: res.meta.orientation });
+      const dp = renderDepth(res, msg.previewSize || 1600);
+      const fp = renderFirst(res, msg.exposure || 0);
+      post({
+        type: 'done', demo: !!msg.demo, first: fp,
+        preview: { data: pv.data, w: pv.w, h: pv.h }, depth: { data: dp.data, w: dp.w, h: dp.h },
+        width: res.width, height: res.height, frames: res.frames, warnings: res.warnings, seconds: res.seconds,
+        camera: res.meta.uniqueModel, orientation: res.meta.orientation,
+      }, [pv.data.buffer, dp.data.buffer].concat(fp ? [fp.data.buffer] : []));
+    } else if (msg.type === 'preview') {
+      const res = state.result; if (!res) return;
+      const pv = renderImage(res.data, res.width, res.height, state.rt, { maxSide: msg.previewSize || 1600, exposure: msg.exposure || 0, orientation: res.meta.orientation });
+      const fp = renderFirst(res, msg.exposure || 0);
+      post({ type: 'preview', preview: { data: pv.data, w: pv.w, h: pv.h }, first: fp }, [pv.data.buffer].concat(fp ? [fp.data.buffer] : []));
+    } else if (msg.type === 'zoom') {
+      const res = state.result; if (!res) return;
+      const c = cropRegion(res, msg.x, msg.y, msg.size || 600);
+      const pv = renderImage(c.data, c.w, c.h, state.rt, { exposure: msg.exposure || 0, orientation: res.meta.orientation });
+      post({ type: 'zoom', preview: { data: pv.data, w: pv.w, h: pv.h } }, [pv.data.buffer]);
+    } else if (msg.type === 'export') {
+      const res = state.result; if (!res) throw new Error('先に合成を実行してください');
+      const base = (msg.demo ? 'sample-stack-' : 'focus-stack-') + stamp();
+      let bytes, name, rgba = null;
+      if (msg.format === 'dng') {
+        bytes = writeLinearDNG(res.data, res.width, res.height, res.meta);
+        name = base + '.dng';
+      } else if (msg.format === 'tiff') {
+        const r16 = renderImage(res.data, res.width, res.height, state.rt, { bits: 16, exposure: msg.exposure || 0, orientation: res.meta.orientation });
+        bytes = writeTiff16(r16.data, r16.w, r16.h);
+        name = base + '.tif';
+      } else {
+        const r8 = renderImage(res.data, res.width, res.height, state.rt, { bits: 8, exposure: msg.exposure || 0, orientation: res.meta.orientation });
+        bytes = await encodeJPEG(r8);
+        name = base + '.jpg';
+        if (!bytes) rgba = r8;
+      }
+      if (rgba) {
+        post({ type: 'export', id: msg.id, name, rgba: { data: rgba.data, w: rgba.w, h: rgba.h } }, [rgba.data.buffer]);
+      } else {
+        let zip = null;
+        if (msg.zip && msg.format !== 'jpeg') {
+          zip = makeZip([{ name, data: bytes }]);
+        }
+        post({ type: 'export', id: msg.id, name, bytes: zip ? null : bytes, zip }, zip ? [] : [bytes.buffer]);
+      }
+    }
+  } catch (err) {
+    post({ type: 'error', id: msg.id, message: err && err.message ? err.message : String(err) });
+  }
+}
+
+return { handleMessage };
+}
+</script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let worker = null;
+  let files = [];
+  let busy = false;
+  let lastResult = null; // {demo, preview, depth, frames, ...}
+  let view = 'image';
+  let demoCount = 0;
+  let wakeLock = null;
+  let timer = null;
+  let exportId = 0;
+  const pending = new Map();
+
+  // Heavy work runs in a Web Worker. Where workers are unavailable (some in-app browsers),
+  // fall back to running the same code on the page itself.
+  let workerAlive = false, usingFallback = false, lastRunMsg = null;
+  function useFallback(reason) {
+    if (usingFallback) return;
+    usingFallback = true;
+    console.warn('worker unavailable, running on page:', reason);
+    try { if (worker && worker.terminate) worker.terminate(); } catch (e) {}
+    const core = coreFactory();
+    const fake = {
+      onmessage: null,
+      postMessage(msg) { setTimeout(() => core.handleMessage(msg, (m) => fake.onmessage && fake.onmessage({ data: m })), 0); },
+      terminate() {},
+    };
+    fake.onmessage = onMessage;
+    worker = fake;
+    if (busy && lastRunMsg) worker.postMessage(lastRunMsg);
+    if (files.length) worker.postMessage({ type: 'info', id: ++exportId, file: files[0] });
+  }
+  function makeWorker() {
+    try {
+      const src = coreFactory.toString() + '\n;const __core = coreFactory();\nself.onmessage = (e) => __core.handleMessage(e.data, (m, t) => self.postMessage(m, t || []));\n';
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      const w = new Worker(url);
+      w.onmessage = (e) => { workerAlive = true; onMessage(e); };
+      w.onerror = (e) => {
+        if (!workerAlive) { useFallback(e.message || 'error event'); return; }
+        showError('処理中にエラーが発生しました: ' + (e.message || '不明なエラー')); finishRun();
+      };
+      w.postMessage({ type: 'ping' });
+      setTimeout(() => { if (!workerAlive) useFallback('no response'); }, 2500);
+      return w;
+    } catch (e) {
+      setTimeout(() => useFallback(e.message), 0);
+      return { postMessage() {}, terminate() {} };
+    }
+  }
+  worker = makeWorker();
+
+  // ---- downloads: artifact capability when hosted on claude.ai, plain links elsewhere ----
+  let downloadsCap = null;
+  const capReady = (async () => {
+    try {
+      if (window.claude && typeof window.claude.use === 'function') downloadsCap = await window.claude.use('downloads');
+    } catch (e) { downloadsCap = null; }
+  })();
+
+  const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  const fmtMB = (n) => (n / 1048576).toFixed(n > 1048576 * 100 ? 0 : 1) + ' MB';
+
+  function setFiles(list) {
+    files = Array.from(list).filter((f) => f.size > 0).sort(naturalSort);
+    const other = files.filter((f) => !/\.dng$/i.test(f.name));
+    if (other.length) showError(`DNG以外のファイル(${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''})が含まれています。合成にはDNGのみ使えます`); else hideError();
+    files = files.filter((f) => /\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name));
+    renderFiles();
+    if (files.length) {
+      const id = ++exportId;
+      worker.postMessage({ type: 'info', id, file: files[0] });
+    }
+  }
+
+  function renderFiles() {
+    const ol = $('fileList');
+    ol.innerHTML = '';
+    files.forEach((f, i) => {
+      const li = document.createElement('li');
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1);
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = f.name;
+      const sz = document.createElement('span'); sz.className = 'sz'; sz.textContent = fmtMB(f.size);
+      li.append(n, nm, sz);
+      ol.appendChild(li);
+    });
+    ol.hidden = $('filebar').hidden = files.length === 0;
+    const total = files.reduce((s, f) => s + f.size, 0);
+    $('fileMeta').textContent = files.length ? `${files.length}枚・合計 ${fmtMB(total)}` : '';
+    $('run').disabled = busy || files.length < 2;
+    $('run').textContent = files.length === 1 ? 'あと1枚以上選んでください' : '深度合成を開始';
+  }
+
+  $('file').addEventListener('change', (e) => { setFiles(e.target.files); e.target.value = ''; });
+  const drop = $('drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) setFiles(e.dataTransfer.files); });
+  $('reverse').addEventListener('click', () => { files.reverse(); renderFiles(); });
+  $('clear').addEventListener('click', () => { files = []; renderFiles(); });
+
+  for (const [id, out] of [['detail', 'detailOut'], ['smooth', 'smoothOut']]) {
+    $(id).addEventListener('input', () => { $(out).textContent = $(id).value; });
+  }
+  $('align').addEventListener('change', () => { $('rotate').disabled = !$('align').checked; });
+
+  function options() {
+    return {
+      half: $('sizeHalf').checked,
+      align: $('align').checked,
+      noRotation: !$('rotate').checked,
+      detail: +$('detail').value,
+      smooth: +$('smooth').value,
+    };
+  }
+
+  function previewSize() {
+    const w = $('resultSec').clientWidth || 700;
+    return Math.min(2000, Math.max(900, Math.round(w * (window.devicePixelRatio || 1))));
+  }
+
+  async function startRun(demo) {
+    if (busy) return;
+    busy = true;
+    hideError();
+    $('run').disabled = true; $('demo').disabled = true;
+    $('progress').hidden = false;
+    $('barFill').style.width = '0%';
+    $('pText').textContent = '準備中';
+    const t0 = Date.now();
+    clearInterval(timer);
+    timer = setInterval(() => { $('pTime').textContent = Math.round((Date.now() - t0) / 1000) + 's'; }, 500);
+    try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
+    demoCount += demo ? 1 : 0;
+    lastRunMsg = { type: 'run', demo, seed: demo ? (demoCount === 1 ? 11 : Math.floor(Math.random() * 1e9)) : 0, files: demo ? null : files, opts: options(), exposure: +$('exposure').value, previewSize: previewSize() };
+    worker.postMessage(lastRunMsg);
+  }
+
+  function finishRun() {
+    busy = false;
+    clearInterval(timer);
+    $('demo').disabled = false;
+    renderFiles();
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+
+  $('run').addEventListener('click', () => startRun(false));
+  $('demo').addEventListener('click', () => startRun(true));
+
+  function onMessage(e) {
+    const m = e.data;
+    if (m.type === 'pong') return;
+    if (m.type === 'progress') {
+      // Pass 1 (decode/align/measure) ~ 60%, pass 2 (blend) ~ 40%.
+      let pct = 0;
+      if (m.phase === 1) pct = ((m.frame + 0.5) / m.total) * 60;
+      else if (m.phase === 2) pct = 60 + ((m.frame + 0.5) / m.total) * 40;
+      $('barFill').style.width = pct.toFixed(1) + '%';
+      $('pText').textContent = m.text;
+    } else if (m.type === 'info') {
+      const i = m.info;
+      const comp = { 1: '非圧縮', 7: 'ロスレス圧縮', 8: 'Deflate圧縮', 34892: '非可逆圧縮', 52546: 'JPEG XL圧縮' }[i.compression] || ('圧縮' + i.compression);
+      const mp = (i.width * i.height / 1e6).toFixed(1);
+      $('fileMeta').textContent = `${files.length}枚・${[i.make, i.model].filter(Boolean).join(' ')}・${i.width}×${i.height}（${mp}MP）・${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
+      if (i.width * i.height > 30e6) {
+        $('sizeHalf').checked = true;
+        $('sizeHint').textContent = `${mp}MPの大きなRAWなので1/2を選びました。メモリに余裕のある端末ならフル解像度も試せます。`;
+      }
+    } else if (m.type === 'done') {
+      $('barFill').style.width = '100%';
+      $('pText').textContent = `完了（${m.seconds.toFixed(1)}秒）`;
+      lastResult = m;
+      const userRun = !!lastRunMsg && !(m.demo && demoCount === 1);
+      try {
+        showResult(m);
+        if (userRun) {
+          $('resultSec').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const v = $('viewer'); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
+        }
+      } catch (err) { showError('結果の表示に失敗しました: ' + err.message); }
+      finishRun();
+    } else if (m.type === 'preview') {
+      if (lastResult) { lastResult.preview = m.preview; if (m.first) lastResult.first = m.first; drawView(); }
+    } else if (m.type === 'zoom') {
+      const c = $('zoom');
+      c.width = m.preview.w; c.height = m.preview.h;
+      c.getContext('2d').putImageData(new ImageData(m.preview.data, m.preview.w, m.preview.h), 0, 0);
+      $('zoombox').hidden = false;
+    } else if (m.type === 'export') {
+      const cb = pending.get(m.id); pending.delete(m.id);
+      if (cb) cb.resolve(m);
+    } else if (m.type === 'error') {
+      const cb = m.id != null ? pending.get(m.id) : null;
+      if (cb) { pending.delete(m.id); cb.reject(new Error(m.message)); return; }
+      if (busy) { showError(m.message); finishRun(); $('progress').hidden = true; }
+      else if (files.length) $('fileMeta').textContent = `${files.length}枚・${m.message}`;
+    }
+  }
+
+  function showError(t) { $('error').textContent = t; $('error').hidden = false; }
+  function hideError() { $('error').hidden = true; }
+
+  function showResult(m) {
+    $('resultEmpty').hidden = true;
+    $('resultBody').hidden = false;
+    $('demoBadge').hidden = !m.demo;
+    const now = new Date();
+    $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
+    $('tabFirst').hidden = !m.first;
+    $('zoombox').hidden = true;
+    drawView();
+    $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);
+    const used = m.frames.filter((f) => f.share > 0).length;
+    $('stFrames').textContent = `${used} / ${m.frames.length}`;
+    $('stTime').textContent = m.seconds.toFixed(1) + ' 秒';
+    $('legendEnd').textContent = `${m.frames.length}枚目（奥）`;
+    // Contribution rail
+    const rail = $('rail');
+    rail.innerHTML = '';
+    const head = document.createElement('div'); head.className = 'rail-row rail-head';
+    head.innerHTML = '<span></span><span>フレームごとの採用率（色は深度マップと対応）</span><span style="text-align:right">採用</span><span style="text-align:right">画角補正</span>';
+    rail.appendChild(head);
+    const maxShare = Math.max(...m.frames.map((f) => f.share), 0.0001);
+    const cols = [[38, 70, 83], [42, 157, 143], [138, 177, 125], [233, 196, 106], [244, 162, 97], [231, 111, 81], [190, 60, 90]];
+    const colorAt = (t) => { const p = t * 6, i = Math.min(5, Math.floor(p)), f = p - i; const a = cols[i], b = cols[i + 1]; return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(',')})`; };
+    m.frames.forEach((f, i) => {
+      const row = document.createElement('div'); row.className = 'rail-row';
+      row.title = f.name;
+      const idx = document.createElement('span'); idx.className = 'i'; idx.textContent = i + 1;
+      const tr = document.createElement('span'); tr.className = 'track';
+      const bar = document.createElement('i'); bar.style.width = (f.share / maxShare * 100).toFixed(1) + '%'; bar.style.background = colorAt(m.frames.length > 1 ? i / (m.frames.length - 1) : 0);
+      tr.appendChild(bar);
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = (f.share * 100).toFixed(1) + '%';
+      const s = document.createElement('span'); s.className = 's'; const pct = (f.scale - 1) * 100; s.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+      row.append(idx, tr, v, s);
+      rail.appendChild(row);
+    });
+    const w = $('warn');
+    if (m.warnings && m.warnings.length) {
+      w.innerHTML = '';
+      const ul = document.createElement('ul');
+      m.warnings.forEach((t) => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+      w.appendChild(ul); w.hidden = false;
+    } else w.hidden = true;
+    $('saved').textContent = '';
+  }
+
+  function drawView() {
+    if (!lastResult) return;
+    if (view === 'first' && !lastResult.first) view = 'image';
+    const src = view === 'image' ? lastResult.preview : view === 'first' ? lastResult.first : lastResult.depth;
+    const c = $('view');
+    c.width = src.w; c.height = src.h;
+    c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.w, src.h), 0, 0);
+    $('viewTag').textContent = view === 'image' ? '合成結果' : view === 'first' ? '合成前（1枚目のみ）' : '深度マップ（どのフレームを使ったか）';
+    for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
+    $('legend').hidden = view !== 'depth';
+  }
+
+  for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).addEventListener('click', () => { view = v; drawView(); });
+
+  $('view').addEventListener('click', (e) => {
+    if (!lastResult || busy) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    const size = Math.round(Math.min(900, Math.max(320, ($('resultSec').clientWidth || 600) * Math.min(2, window.devicePixelRatio || 1))));
+    worker.postMessage({ type: 'zoom', x, y, size, exposure: +$('exposure').value });
+  });
+  $('zoomClose').addEventListener('click', () => { $('zoombox').hidden = true; });
+
+  let expTimer = null;
+  $('exposure').addEventListener('input', () => {
+    const v = +$('exposure').value;
+    $('expOut').textContent = (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' EV';
+    clearTimeout(expTimer);
+    expTimer = setTimeout(() => { if (lastResult && !busy) worker.postMessage({ type: 'preview', exposure: v, previewSize: previewSize() }); }, 120);
+  });
+
+  function requestExport(format, zip) {
+    const id = ++exportId;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ type: 'export', id, format, zip, exposure: +$('exposure').value, demo: !!(lastResult && lastResult.demo) });
+    });
+  }
+
+  async function rgbaToJpegBlob(r) {
+    const c = document.createElement('canvas'); c.width = r.w; c.height = r.h;
+    c.getContext('2d').putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
+    return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.93));
+  }
+
+  document.querySelectorAll('.exports button').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!lastResult || busy) return;
+    const fmt = btn.dataset.fmt;
+    const label = { dng: 'DNG', tiff: 'TIFF', jpeg: 'JPEG' }[fmt];
+    const buttons = document.querySelectorAll('.exports button');
+    buttons.forEach((b) => (b.disabled = true));
+    $('saved').textContent = `${label}を書き出しています…`;
+    try {
+      await capReady;
+      const useCap = !!downloadsCap;
+      const m = await requestExport(fmt, useCap);
+      let blob, name = m.name;
+      if (m.rgba) blob = await rgbaToJpegBlob(m.rgba);
+      else if (m.zip) { blob = m.zip; name = m.name.replace(/\.[^.]+$/, '') + '.zip'; }
+      else blob = new Blob([m.bytes], { type: fmt === 'jpeg' ? 'image/jpeg' : fmt === 'dng' ? 'image/x-adobe-dng' : 'image/tiff' });
+      const size = fmtMB(blob.size);
+      if (useCap) {
+        try {
+          await downloadsCap.save({ filename: name, data: blob });
+          $('saved').textContent = m.zip ? `${name}（${size}）を保存しました。ZIPを展開すると ${m.name} が入っています。` : `${name}（${size}）を保存しました。`;
+        } catch (err) {
+          const code = err && err.code;
+          $('saved').textContent = code === 'declined' ? '保存をキャンセルしました。' : code === 'rate_limited' ? '保存の確認画面がすでに開いています。少し待ってからもう一度押してください。' : '保存できませんでした: ' + (err.message || code);
+        }
+      } else {
+        const file = new File([blob], name, { type: blob.type });
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/i.test(navigator.userAgent)) {
+          try { await navigator.share({ files: [file] }); $('saved').textContent = `${name}（${size}）を共有メニューに渡しました。`; return; }
+          catch (err) { if (err && err.name === 'AbortError') { $('saved').textContent = '保存をキャンセルしました。'; return; } }
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        $('saved').textContent = `${name}（${size}）をダウンロードしました。`;
+      }
+    } catch (err) {
+      $('saved').textContent = '書き出せませんでした: ' + err.message;
+    } finally {
+      buttons.forEach((b) => (b.disabled = false));
+    }
+  }));
+
+  renderFiles();
+  // Open in a working state: run the small built-in sample once.
+  setTimeout(() => startRun(true), 300);
+})();
+
+</script>
+</body></html>
