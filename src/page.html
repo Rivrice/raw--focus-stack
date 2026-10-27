@@ -114,6 +114,21 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 @media (prefers-reduced-motion: reduce) { .viewer.flash { animation: none; } }
 .viewer canvas { display: block; width: 100%; height: auto; cursor: zoom-in; touch-action: manipulation; }
 .viewer .tag { position: absolute; left: 8px; top: 8px; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; pointer-events: none; }
+/* Before|After: the "before" canvas sits on top and is clipped to the left of the divider. */
+.viewer { --pos: 50%; }
+.viewer.comparing { touch-action: pan-y; }
+.viewer canvas.before { position: absolute; inset: 0; height: 100%; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.cmp { position: absolute; inset: 0; pointer-events: none; }
+.cmp .tag { transition: opacity 0.15s; }
+.cmp .cmp-l { left: 8px; }
+.cmp .cmp-r { left: auto; right: 8px; }
+.cmp-line { position: absolute; top: 0; bottom: 0; left: var(--pos); width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.cmp-line::before { content: ""; position: absolute; inset: 0 -18px; } /* wider grab area */
+.cmp-knob { position: absolute; top: 50%; left: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+.cmp-knob::before, .cmp-knob::after { content: ""; position: absolute; top: 50%; margin-top: -5px; border: 5px solid transparent; }
+.cmp-knob::before { left: 5px; border-right: 6px solid #333; border-left: 0; }
+.cmp-knob::after { right: 5px; border-left: 6px solid #333; border-right: 0; }
+.cmp-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .zoombox { display: flex; flex-direction: column; gap: 6px; }
 .zoombox canvas { width: 100%; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -233,13 +248,13 @@ footer a { color: inherit; }
       <div style="display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px">
           <div class="tabs" role="group" aria-label="表示">
-            <button type="button" id="tabImage" aria-pressed="true">合成結果</button>
-            <button type="button" id="tabFirst" aria-pressed="false">合成前（1枚目）</button>
+            <button type="button" id="tabCompare" aria-pressed="true">Before｜After</button>
+            <button type="button" id="tabImage" aria-pressed="false">合成結果</button>
             <button type="button" id="tabDepth" aria-pressed="false">深度マップ</button>
           </div>
-          <span class="hint">画像をタップすると、その部分を等倍で表示します</span>
+          <span class="hint">左右にドラッグして比較、タップでその部分を等倍表示</span>
         </div>
-        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><span class="tag" id="viewTag">合成結果</span></div>
+        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><canvas id="viewBefore" class="before" aria-hidden="true" hidden></canvas><span class="tag" id="viewTag">合成結果</span><div class="cmp" id="cmp" hidden><span class="tag cmp-l">Before（1枚目）</span><span class="tag cmp-r">After（合成）</span><div class="cmp-line" id="cmpLine" role="slider" tabindex="0" aria-label="Before と After の境界" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="cmp-knob" aria-hidden="true"></span></div></div></div>
         <div class="legend" id="legend" hidden><span>1枚目（手前）</span><i></i><span id="legendEnd">最後</span></div>
         <div class="zoombox" id="zoombox" hidden>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="hint">等倍表示（タップした位置）</span><button class="ghost" type="button" id="zoomClose">閉じる</button></div>

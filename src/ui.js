@@ -4,7 +4,7 @@
   let files = [];
   let busy = false;
   let lastResult = null; // {demo, preview, depth, frames, ...}
-  let view = 'image';
+  let view = 'compare', cmpPos = 50;
   let demoCount = 0;
   let wakeLock = null;
   let timer = null;
@@ -206,7 +206,7 @@
     $('demoBadge').hidden = !m.demo;
     const now = new Date();
     $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
-    $('tabFirst').hidden = !m.first;
+    $('tabCompare').hidden = !m.first;
     $('zoombox').hidden = true;
     drawView();
     $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);
@@ -247,19 +247,71 @@
 
   function drawView() {
     if (!lastResult) return;
-    if (view === 'first' && !lastResult.first) view = 'image';
-    const src = view === 'image' ? lastResult.preview : view === 'first' ? lastResult.first : lastResult.depth;
+    if (view === 'compare' && !lastResult.first) view = 'image';
+    const src = view === 'depth' ? lastResult.depth : lastResult.preview;
     const c = $('view');
     c.width = src.w; c.height = src.h;
     c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.w, src.h), 0, 0);
-    $('viewTag').textContent = view === 'image' ? '合成結果' : view === 'first' ? '合成前（1枚目のみ）' : '深度マップ（色で使った写真を表示）';
-    for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
+    const comparing = view === 'compare';
+    if (comparing) {
+      // The first frame can differ from the result by a pixel or two; scale it onto the result's canvas.
+      const f = lastResult.first, b = $('viewBefore'), tmp = document.createElement('canvas');
+      tmp.width = f.w; tmp.height = f.h;
+      tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(f.data), f.w, f.h), 0, 0);
+      b.width = src.w; b.height = src.h;
+      b.getContext('2d').drawImage(tmp, 0, 0, src.w, src.h);
+    }
+    $('viewBefore').hidden = $('cmp').hidden = !comparing;
+    $('viewTag').hidden = comparing;
+    $('viewer').classList.toggle('comparing', comparing);
+    setCmp(cmpPos);
+    $('viewTag').textContent = view === 'image' ? '合成結果' : '深度マップ（色で使った写真を表示）';
+    for (const [id, v] of [['tabCompare', 'compare'], ['tabImage', 'image'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
     $('legend').hidden = view !== 'depth';
   }
 
-  for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).addEventListener('click', () => { view = v; drawView(); });
+  for (const [id, v] of [['tabCompare', 'compare'], ['tabImage', 'image'], ['tabDepth', 'depth']]) $(id).addEventListener('click', () => { view = v; drawView(); });
 
-  $('view').addEventListener('click', (e) => {
+  // Before|After divider: drag anywhere on the image (horizontal moves), or use the arrow keys on the divider.
+  function setCmp(p) {
+    cmpPos = Math.min(100, Math.max(0, p));
+    $('viewer').style.setProperty('--pos', cmpPos + '%');
+    $('cmpLine').setAttribute('aria-valuenow', String(Math.round(cmpPos)));
+    document.querySelector('.cmp-l').style.opacity = cmpPos < 30 ? 0 : 1; // keep labels clear of the divider
+    document.querySelector('.cmp-r').style.opacity = cmpPos > 70 ? 0 : 1;
+  }
+  let drag = null, dragged = false;
+  $('viewer').addEventListener('pointerdown', (e) => {
+    if (view !== 'compare') return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, onLine: e.target.closest('.cmp-line') != null };
+    dragged = false;
+    if (drag.onLine) { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }
+  });
+  $('viewer').addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!dragged && !drag.onLine) {
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 6) { drag = null; return; } // vertical: let the page scroll
+      if (Math.abs(dx) < 6) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    dragged = true;
+    const r = e.currentTarget.getBoundingClientRect();
+    setCmp((e.clientX - r.left) / r.width * 100);
+  });
+  const endDrag = () => { drag = null; };
+  $('viewer').addEventListener('pointerup', endDrag);
+  $('viewer').addEventListener('pointercancel', endDrag);
+  $('cmpLine').addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 10 : 2;
+    if (e.key === 'ArrowLeft') setCmp(cmpPos - step); else if (e.key === 'ArrowRight') setCmp(cmpPos + step);
+    else if (e.key === 'Home') setCmp(0); else if (e.key === 'End') setCmp(100); else return;
+    e.preventDefault();
+  });
+
+  $('viewer').addEventListener('click', (e) => {
+    if (dragged) { dragged = false; return; }
+    if (e.target.closest('.cmp-line') || !e.target.closest('canvas')) return;
     if (!lastResult || busy) return;
     const r = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
