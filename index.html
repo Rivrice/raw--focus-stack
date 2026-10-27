@@ -1922,13 +1922,21 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
   const shape = (sd, cx, cy, r, angle) => ({ sd, cx, cy, r, angle });
   // Keep every shape clear of the frame edge, where focus breathing leaves no data in the outer frames.
   const keep = (v, r, len) => Math.min(len - r - 0.06 * S, Math.max(r + 0.06 * S, v));
-  const shapes = [
-    (() => { const r = S * 0.25, cx = keep(W * (0.22 + j()), r, W), cy = keep(H * (0.36 + j()), r, H); return shape(sdBox(cx, cy, r, r, S * 0.01), cx, cy, r, 0.6); })(),
-    (() => { const r = S * 0.27, cx = keep(W * (0.76 + j()), r, W), cy = keep(H * (0.33 + j()), r, H); return shape(sdCircle(cx, cy, r), cx, cy, r, 0.8); })(),
-    (() => { const cx = W * (0.50 + j()), cy = H * (0.50 + j()), r = S * 0.17; return shape(sdBox(cx, cy, r, r, S * 0.008, Math.PI / 4), cx, cy, r * 1.41, 0.7); })(),
-    (() => { const cx = W * (0.24 + j()), cy = H * (0.74 + j()), r = S * 0.25; return shape(sdTri(cx, cy, r), cx, cy, r, -0.5); })(),
-    (() => { const cx = W * (0.75 + j()), cy = H * (0.77 + j()); return shape(sdBars(cx, cy, S * 0.25, S * 0.028, 4, S * 0.025), cx, cy, S * 0.25, 0); })(),
+  // Three shapes (far, middle, near); which kinds appear changes with the seed.
+  const kinds = [
+    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.92, r * 0.92, S * 0.01), cx, cy, r, 0.6),
+    (cx, cy, r) => shape(sdCircle(cx, cy, r), cx, cy, r, 0.8),
+    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.7, r * 0.7, S * 0.008, Math.PI / 4), cx, cy, r, 0.7),
+    (cx, cy, r) => shape(sdTri(cx, cy + r * 0.25, r * 1.05), cx, cy, r, -0.5),
+    (cx, cy, r) => shape(sdBars(cx, cy, r, r * 0.12, 4, r * 0.1), cx, cy, r, 0),
   ];
+  for (let i = kinds.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [kinds[i], kinds[k]] = [kinds[k], kinds[i]]; }
+  const slots = [[0.29, 0.40, 0.30], [0.73, 0.36, 0.26], [0.53, 0.70, 0.22]];
+  const shapes = slots.map(([sx, sy, sr], i) => {
+    const r = S * sr, cx = keep(W * (sx + j()), r, W), cy = keep(H * (sy + j()), r, H);
+    return kinds[i](cx, cy, r);
+  });
+
   // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
   const speck = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
   const grain = (x, y) => 0.8 + 0.12 * n1(x, y) + 0.06 * n2(x, y) + 0.14 * speck(x, y);
@@ -1949,7 +1957,7 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
   ].concat(shapes.map((sh, i) => {
     const pal = palettes[i], ca = Math.cos(sh.angle), sa = Math.sin(sh.angle);
     return {
-      depth: (n - 1) * (0.86 - i * 0.2) + 0.1,
+      depth: [n - 1.2, (n - 1) * 0.5, 0.1][i],
       alpha: (x, y) => Math.min(1, Math.max(0, 0.5 - sh.sd(x, y))),
       col: (x, y, out) => {
         ramp(pal, 0.5 + ((x - sh.cx) * ca + (y - sh.cy) * sa) / (2 * sh.r) + 0.25 * (n3(x + i * 97, y) - 0.5), out);
