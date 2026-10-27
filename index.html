@@ -1876,8 +1876,9 @@ function makeZip(files) { // [{name, data: Uint8Array}] -> Blob
 // Renders layered textured objects at different depths, blurs each layer according to the
 // focus position of each frame, adds slight focus breathing and noise, and stores Bayer DNGs.
 function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
-  let s = seed >>> 0;
+  let s = Math.imul(seed >>> 0, 2654435761) >>> 0; // spread nearby seeds apart
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < 4; i++) rnd();
   const noiseTex = (cell) => {
     // Margin so per-shape offsets (< 600 px) never reach the wrap-around seam.
     const gw = Math.ceil((W + 600) / cell) + 2, gh = Math.ceil((H + 600) / cell) + 2;
@@ -1905,13 +1906,12 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
     { L: 0.46, C: 0.13, dh: -28 }, { L: 0.66, C: 0.13, dh: 0 }, { L: 0.86, C: 0.10, dh: 28 },
   ];
   const palettes = tones.map(({ L, C, dh }) => [-22, 0, 22].map((sp, k) => oklch(L + 0.035 * (1 - k), C, hue + dh + sp)));
-  const backdrop = oklch(0.27, 0.05, hue - 40);
+  const backdrop = oklch(0.25, 0.045, hue - 10);
   const ramp = (stops, t, out) => {
     t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
     const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i, ss = f * f * (3 - 2 * f), a = stops[i], b = stops[i + 1];
     for (let k = 0; k < 3; k++) out[k] = a[k] + (b[k] - a[k]) * ss;
   };
-  const j = () => (rnd() - 0.5) * 0.08;
   const S = Math.min(W, H);
   // Signed distances (px, negative inside).
   const sdCircle = (cx, cy, r) => (x, y) => Math.hypot(x - cx, y - cy) - r;
@@ -1932,18 +1932,31 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
   const keep = (v, r, len) => Math.min(len - r - 0.06 * S, Math.max(r + 0.06 * S, v));
   // Three shapes (far, middle, near); which kinds appear changes with the seed.
   const kinds = [
-    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.92, r * 0.92, S * 0.01), cx, cy, r, 0.6),
-    (cx, cy, r) => shape(sdCircle(cx, cy, r), cx, cy, r, 0.8),
-    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.7, r * 0.7, S * 0.008, Math.PI / 4), cx, cy, r, 0.7),
-    (cx, cy, r) => shape(sdTri(cx, cy + r * 0.25, r * 1.05), cx, cy, r, -0.5),
-    (cx, cy, r) => shape(sdBars(cx, cy, r, r * 0.12, 4, r * 0.1), cx, cy, r, 0),
+    // Each kind fills roughly [-0.9r, 0.9r] vertically so shapes on one baseline line up.
+    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.9, r * 0.9, S * 0.01), cx, cy, r, 0.6),
+    (cx, cy, r) => shape(sdCircle(cx, cy, r * 0.92), cx, cy, r, 0.8),
+    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.65, r * 0.65, S * 0.008, Math.PI / 4), cx, cy, r, 0.7),
+    (cx, cy, r) => shape(sdTri(cx, cy + r * 0.3, r * 1.2), cx, cy, r, -0.5),
+    (cx, cy, r) => shape(sdBars(cx, cy, r * 0.9, r * 0.14, 4, r * 0.16), cx, cy, r, 0),
   ];
+  const bars = kinds[4];
   for (let i = kinds.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [kinds[i], kinds[k]] = [kinds[k], kinds[i]]; }
-  const slots = [[0.29, 0.40, 0.30], [0.73, 0.36, 0.26], [0.53, 0.70, 0.22]];
-  const shapes = slots.map(([sx, sy, sr], i) => {
-    const r = S * sr, cx = keep(W * (sx + j()), r, W), cy = keep(H * (sy + j()), r, H);
+  if (kinds[2] === bars) [kinds[2], kinds[3]] = [kinds[3], kinds[2]]; // bars read better behind a solid shape
+  // Composed layouts (far, middle, near as [x, y, half-size]): the near shape is the largest, so size reads as depth.
+  // Each layout either overlaps the shapes or stands them on one baseline. Mirrored at random.
+  const base = 0.84;
+  const layouts = [
+    [[0.37, 0.33, 0.20], [0.50, 0.50, 0.26], [0.65, 0.64, 0.32]],                       // diagonal cascade, overlapping
+    [[0.50, 0.30, 0.20], [0.34, 0.55, 0.26], [0.64, 0.62, 0.31]],                       // cluster, near shape in front of both
+    [[0.20, base - 0.16, 0.16], [0.46, base - 0.22, 0.22], [0.77, base - 0.29, 0.29]],  // one baseline, growing toward the viewer
+    [[0.68, 0.30, 0.19], [0.55, 0.47, 0.25], [0.38, 0.63, 0.31]],                       // receding diagonal into the top corner
+  ];
+  const layout = layouts[Math.floor(rnd() * layouts.length)], flip = rnd() < 0.5;
+  const shapes = layout.map(([sx, sy, sr], i) => {
+    const r = S * sr, cx = keep(W * (flip ? 1 - sx : sx), r, W), cy = keep(H * 0.5 + (sy - 0.5) * S, r, H);
     return kinds[i](cx, cy, r);
   });
+
 
   // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
   const speck = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
