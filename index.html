@@ -35,14 +35,24 @@ body {
   background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 20px 48px;
+  /* Japanese typesetting: break between phrases, not inside words (Chrome: auto-phrase; others: <wbr> from ui.js). */
+  word-break: auto-phrase; line-break: strict; overflow-wrap: anywhere;
+  font-kerning: normal; letter-spacing: 0.02em;
+  text-spacing-trim: trim-start; text-autospace: normal;
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
 }
+.ph { word-break: keep-all; }
+h1, h2, button, .seg label, .field > label, .field > .lbl, .chip, .badge, .tabs button, .stat span, details summary, .drop strong {
+  font-feature-settings: "palt"; letter-spacing: 0.04em;
+}
+.lede, .hint, .field small, details li, .drop span, footer p, .notice, .exports button span { text-wrap: pretty; }
 .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 header { display: flex; flex-direction: column; gap: 6px; padding-block: 6px 4px; }
-h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.02em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.06em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
 h1 .mark { width: 22px; height: 22px; flex: none; }
-.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.lede { margin: 0; color: var(--muted); max-width: 40em; line-height: 1.75; }
 .formats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.chip { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
+.chip { font-size: 0.75rem; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
 section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .step-head { display: flex; align-items: baseline; gap: 10px; }
 .step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; }
@@ -54,7 +64,7 @@ h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
 }
 .drop:hover, .drop.over { border-color: var(--accent); }
 .drop strong { font-size: 1rem; }
-.drop span { color: var(--muted); font-size: 0.85rem; }
+.drop span { color: var(--muted); font-size: 0.85rem; max-width: 26em; text-wrap: balance; }
 .drop { position: relative; }
 .drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -78,7 +88,8 @@ ol.files .sz { font-family: var(--font-mono); color: var(--muted); font-variant-
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg label:has(input:checked) { background: var(--ink); color: var(--bg); }
 .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-.check { display: flex; gap: 8px; align-items: center; font-size: 0.86rem; color: var(--muted); }
+.field > label.check { display: flex; justify-content: flex-start; gap: 8px; align-items: flex-start; font-weight: 400; font-size: 0.86rem; color: var(--muted); line-height: 1.5; letter-spacing: 0.02em; font-feature-settings: normal; }
+.check input { margin: 2px 0 0; flex: none; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 14px; }
@@ -103,11 +114,26 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 @media (prefers-reduced-motion: reduce) { .viewer.flash { animation: none; } }
 .viewer canvas { display: block; width: 100%; height: auto; cursor: zoom-in; touch-action: manipulation; }
 .viewer .tag { position: absolute; left: 8px; top: 8px; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; pointer-events: none; }
+/* Before|After: the "before" canvas sits on top and is clipped to the left of the divider. */
+.viewer { --pos: 50%; }
+.viewer.comparing { touch-action: pan-y; }
+.viewer canvas.before { position: absolute; inset: 0; height: 100%; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.cmp { position: absolute; inset: 0; pointer-events: none; }
+.cmp .tag { transition: opacity 0.15s; }
+.cmp .cmp-l { left: 8px; }
+.cmp .cmp-r { left: auto; right: 8px; }
+.cmp-line { position: absolute; top: 0; bottom: 0; left: var(--pos); width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.cmp-line::before { content: ""; position: absolute; inset: 0 -18px; } /* wider grab area */
+.cmp-knob { position: absolute; top: 50%; left: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+.cmp-knob::before, .cmp-knob::after { content: ""; position: absolute; top: 50%; margin-top: -5px; border: 5px solid transparent; }
+.cmp-knob::before { left: 5px; border-right: 6px solid #333; border-left: 0; }
+.cmp-knob::after { right: 5px; border-left: 6px solid #333; border-right: 0; }
+.cmp-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .zoombox { display: flex; flex-direction: column; gap: 6px; }
 .zoombox canvas { width: 100%; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-left: 2px solid var(--line); }
-.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.98rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 6px 10px; min-width: 0; border-left: 2px solid var(--line); }
+.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem; white-space: nowrap; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .stat span { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; }
 .rail { display: flex; flex-direction: column; gap: 4px; }
 .rail-row { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) 4.2em 5.4em; gap: 8px; align-items: center; font-size: 0.8rem; }
@@ -118,7 +144,7 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 .rail-row .s { color: var(--muted); }
 .rail-head { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; }
 .exports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } }
 .exports button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .exports button b { font-size: 0.95rem; }
 .exports button span { font-size: 0.75rem; color: var(--muted); }
@@ -133,14 +159,15 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 details { font-size: 0.88rem; color: var(--muted); }
 details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details ul { padding-left: 1.2em; margin: 8px 0 0; }
-footer { color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+footer { color: var(--muted); font-size: 0.75rem; line-height: 1.7; text-align: center; display: flex; flex-direction: column; gap: 8px; padding-inline: 4px; }
+footer p { text-wrap: balance; max-width: 40em; margin-inline: auto; }
 footer p { margin: 0; }
 footer a { color: inherit; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
 
-<div class="wrap">
+<div class="wrap" lang="ja">
   <header>
     <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
     <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
@@ -221,13 +248,13 @@ footer a { color: inherit; }
       <div style="display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px">
           <div class="tabs" role="group" aria-label="表示">
-            <button type="button" id="tabImage" aria-pressed="true">合成結果</button>
-            <button type="button" id="tabFirst" aria-pressed="false">合成前（1枚目）</button>
+            <button type="button" id="tabCompare" aria-pressed="true">Before｜After</button>
+            <button type="button" id="tabImage" aria-pressed="false">合成結果</button>
             <button type="button" id="tabDepth" aria-pressed="false">深度マップ</button>
           </div>
-          <span class="hint">画像をタップすると、その部分を等倍で表示します</span>
+          <span class="hint">左右にドラッグして比較、タップでその部分を等倍表示</span>
         </div>
-        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><span class="tag" id="viewTag">合成結果</span></div>
+        <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><canvas id="viewBefore" class="before" aria-hidden="true" hidden></canvas><span class="tag" id="viewTag">合成結果</span><div class="cmp" id="cmp" hidden><span class="tag cmp-l">Before（1枚目）</span><span class="tag cmp-r">After（合成）</span><div class="cmp-line" id="cmpLine" role="slider" tabindex="0" aria-label="Before と After の境界" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="cmp-knob" aria-hidden="true"></span></div></div></div>
         <div class="legend" id="legend" hidden><span>1枚目（手前）</span><i></i><span id="legendEnd">最後</span></div>
         <div class="zoombox" id="zoombox" hidden>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="hint">等倍表示（タップした位置）</span><button class="ghost" type="button" id="zoomClose">閉じる</button></div>
@@ -257,7 +284,7 @@ footer a { color: inherit; }
 
   <footer>
     <p>このページは外部と通信しません。読み込んだ画像は、この端末の中だけで処理されます。</p>
-    <p>This product includes DNG technology under license by Adobe.<br>DNG と Lightroom は Adobe Inc.、iPhone は Apple Inc. の商標です。その他の製品名も、それぞれの会社の商標または登録商標です。このツールは、これらの会社が提供・推奨するものではありません。</p>
+    <p>This product includes DNG technology under license by Adobe.<br>DNG と Lightroom は Adobe Inc.、iPhone は Apple Inc. の商標です。その他の製品名も、それぞれの会社の商標または登録商標です。<br>このツールは、これらの会社が提供・推奨するものではありません。</p>
     <p>MITライセンスのオープンソースです。動作は保証していません。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコードを見る</a></p>
   </footer>
 </div>
@@ -1191,7 +1218,9 @@ function downscaleLuma(img, w, h, k) {
         let o = (y * w + sx * k) * 3;
         for (let x = 0; x < k; x++, o += 3) s += img[o] + 2 * img[o + 1] + img[o + 2];
       }
-      out[sy * sw + sx] = Math.sqrt(s * inv);
+      // Linear (not gamma) luma: defocus blur is linear in scene light, so edges keep their position
+      // as focus changes and blur does not bias the scale (breathing) estimate.
+      out[sy * sw + sx] = s * inv;
     }
   }
   return { data: out, w: sw, h: sh };
@@ -1862,10 +1891,12 @@ function makeZip(files) { // [{name, data: Uint8Array}] -> Blob
 // Renders layered textured objects at different depths, blurs each layer according to the
 // focus position of each frame, adds slight focus breathing and noise, and stores Bayer DNGs.
 function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
-  let s = seed >>> 0;
+  let s = Math.imul(seed >>> 0, 2654435761) >>> 0; // spread nearby seeds apart
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < 4; i++) rnd();
   const noiseTex = (cell) => {
-    const gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+    // Margin so per-shape offsets (< 600 px) never reach the wrap-around seam.
+    const gw = Math.ceil((W + 600) / cell) + 2, gh = Math.ceil((H + 600) / cell) + 2;
     const g = new Float32Array(gw * gh).map(() => rnd());
     return (x, y) => {
       const fx = x / cell, fy = y / cell, xi = Math.floor(fx), yi = Math.floor(fy), ax = fx - xi, ay = fy - yi;
@@ -1874,26 +1905,119 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
       return (g[i] * (1 - ax) + g[i + 1] * ax) * (1 - ay) + (g[i + gw] * (1 - ax) + g[i + gw + 1] * ax) * ay;
     };
   };
-  const n1 = noiseTex(3), n2 = noiseTex(11), n3 = noiseTex(37);
-  // Layers from far (index 0) to near. depth in "frame units".
-  // Object placement varies with the seed so each sample looks different.
-  const j = () => (rnd() - 0.5) * 0.12;
-  const ex = 0.70 + j(), ey = 0.42 + j(), rx = 0.40 + j(), ry = 0.55 + j(), cx0 = 0.17 + j() * 0.5, cy0 = 0.70 + j();
-  const layers = [
-    { depth: n - 0.6, color: [0.10, 0.22, 0.12], shape: () => 1, tex: (x, y) => 0.25 + 0.5 * n2(x, y) + 0.35 * n1(x * 0.7, y * 0.7) * n3(x, y) },
-    { depth: n * 0.62, color: [0.55, 0.32, 0.12], shape: (x, y) => ((x - W * ex) ** 2 / (W * 0.20) ** 2 + (y - H * ey) ** 2 / (H * 0.36) ** 2) < 1, tex: (x, y) => 0.3 + 0.7 * n1(x, y) * (0.5 + 0.5 * n2(x * 2, y * 2)) },
-    { depth: n * 0.32, color: [0.75, 0.62, 0.20], shape: (x, y) => Math.abs(x - W * rx) < W * 0.12 && Math.abs(y - H * ry) < H * 0.32, tex: (x, y) => ((Math.floor(x / 6) + Math.floor(y / 6)) & 1 ? 1 : 0.35) * (0.7 + 0.3 * n3(x, y)) },
-    { depth: 0.2, color: [0.62, 0.18, 0.28], shape: (x, y) => ((x - W * cx0) ** 2 + (y - H * cy0) ** 2) < (H * 0.20) ** 2, tex: (x, y) => 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(Math.hypot(x - W * cx0, y - H * cy0) * 0.6)) * n1(x * 1.3, y * 1.3) },
+  const n1 = noiseTex(2), n2 = noiseTex(9), n3 = noiseTex(60), n4 = noiseTex(140);
+  // Scene: three grainy gradient shapes on a plain backdrop. Lightness steps with depth (far = dark, near = light)
+  // so the layers stay distinct in greyscale; hues stay within one family for a coherent palette.
+  const oklch = (L, C, h) => { // OKLCH → linear sRGB, reducing chroma until it fits the gamut
+    for (let c = C; ; c *= 0.9) {
+      const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+      const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+      if (c < 0.005 || rgb.every((v) => v >= 0 && v <= 1)) return rgb.map((v) => Math.min(1, Math.max(0, v)));
+    }
+  };
+  const hue = [20, 60, 150, 205, 255, 300, 345][Math.floor(rnd() * 7)];
+  const tones = [ // far → near: lightness, chroma, hue offset within the family
+    { L: 0.46, C: 0.13, dh: -28 }, { L: 0.66, C: 0.13, dh: 0 }, { L: 0.86, C: 0.10, dh: 28 },
   ];
+  const palettes = tones.map(({ L, C, dh }) => [-22, 0, 22].map((sp, k) => oklch(L + 0.035 * (1 - k), C, hue + dh + sp)));
+  const backdrop = oklch(0.25, 0.045, hue - 10);
+  const ramp = (stops, t, out) => {
+    t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i, ss = f * f * (3 - 2 * f), a = stops[i], b = stops[i + 1];
+    for (let k = 0; k < 3; k++) out[k] = a[k] + (b[k] - a[k]) * ss;
+  };
+  const S = Math.min(W, H);
+  // Signed distances (px, negative inside).
+  const sdCircle = (cx, cy, r) => (x, y) => Math.hypot(x - cx, y - cy) - r;
+  const sdBox = (cx, cy, hw, hh, rad, rot = 0) => { const c = Math.cos(rot), sn = Math.sin(rot); return (x, y) => {
+    const u = Math.abs((x - cx) * c + (y - cy) * sn) - hw + rad, v = Math.abs(-(x - cx) * sn + (y - cy) * c) - hh + rad;
+    return Math.hypot(Math.max(u, 0), Math.max(v, 0)) + Math.min(Math.max(u, v), 0) - rad; }; };
+  const sdTri = (cx, cy, r) => (x, y) => { // equilateral, point up, circumradius r
+    const k = Math.sqrt(3), px0 = (x - cx) / r, py0 = -(y - cy) / r - 0.0;
+    let px = Math.abs(px0) - 1 * k / 2, py = py0 + 0.5;
+    if (px + k * py > 0) { const t = px; px = (px - k * py) / 2; py = (-k * t - py) / 2; }
+    px -= Math.min(Math.max(px, -k), 0);
+    return -Math.hypot(px, py) * Math.sign(py) * r; };
+  const sdBars = (cx, cy, hw, hh, count, gap) => { const pitch = (2 * hh + gap), top = cy - (count - 1) * pitch / 2; return (x, y) => {
+    const k = Math.max(0, Math.min(count - 1, Math.round((y - top) / pitch)));
+    return sdBox(cx, top + k * pitch, hw, hh, hh)(x, y); }; };
+  const shape = (sd, cx, cy, r, angle) => ({ sd, cx, cy, r, angle });
+  // Keep every shape clear of the frame edge, where focus breathing leaves no data in the outer frames.
+  const keep = (v, r, len) => Math.min(len - r - 0.06 * S, Math.max(r + 0.06 * S, v));
+  // Three shapes (far, middle, near); which kinds appear changes with the seed.
+  // Each kind spans [-0.9r, 0.9r] vertically (so bottoms line up at cy + 0.9r); hw is its half-width in r.
+  const kinds = [
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.9, r * 0.9, S * 0.01), cx, cy, r, 0.6) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdCircle(cx, cy, r * 0.92), cx, cy, r, 0.8) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.65, r * 0.65, S * 0.008, Math.PI / 4), cx, cy, r, 0.7) },
+    { hw: 1.04, make: (cx, cy, r) => shape(sdTri(cx, cy + r * 0.3, r * 1.2), cx, cy, r, -0.5) },
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBars(cx, cy + r * 0.1, r * 0.9, r * 0.14, 4, r * 0.16), cx, cy, r, 0) },
+  ];
+  const bars = kinds[4];
+  for (let i = kinds.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [kinds[i], kinds[k]] = [kinds[k], kinds[i]]; }
+  if (kinds[2] === bars) [kinds[2], kinds[3]] = [kinds[3], kinds[2]]; // bars read better behind a solid shape
+  // Composed layouts. Every layout follows exactly one rule: the shapes overlap, or they stand side by side on
+  // one baseline. Either way the near shape is the largest, so size reads as depth. Mirrored at random.
+  const sizes = [0.20, 0.26, 0.32];
+  const overlapping = [ // centres (x in W, y in S) for far, middle, near
+    [[0.37, 0.33], [0.50, 0.50], [0.65, 0.64]], // diagonal cascade toward the viewer
+    [[0.50, 0.30], [0.34, 0.55], [0.64, 0.62]], // cluster: near shape in front of both
+    [[0.68, 0.30], [0.55, 0.47], [0.38, 0.63]], // receding diagonal into the top corner
+  ];
+  const pick = Math.floor(rnd() * (overlapping.length + 1)), flip = rnd() < 0.5;
+  let shapes;
+  if (pick < overlapping.length) {
+    shapes = overlapping[pick].map(([sx, sy], i) => {
+      const r = S * sizes[i], cx = keep(W * (flip ? 1 - sx : sx), r, W), cy = keep(H * 0.5 + (sy - 0.5) * S, r, H);
+      return kinds[i].make(cx, cy, r);
+    });
+  } else {
+    // Side by side on one baseline, equal gaps, the whole row centred; no shape touches another.
+    let rs = [0.18, 0.24, 0.31].map((f) => f * S);
+    const gap = 0.07 * W, avail = W - 2 * 0.08 * W - 2 * gap;
+    const need = rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0);
+    if (need > avail) rs = rs.map((r) => r * avail / need);
+    const order = flip ? [2, 1, 0] : [0, 1, 2], baseY = H * 0.5 + 0.9 * rs[2]; // the largest shape is centred vertically
+    let x = (W - (rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0) + 2 * gap)) / 2;
+    shapes = [];
+    for (const i of order) {
+      const w = kinds[i].hw * rs[i];
+      shapes[i] = kinds[i].make(x + w, baseY - 0.9 * rs[i], rs[i]);
+      x += 2 * w + gap;
+    }
+  }
+
+
+
+  // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
+  const speck = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
+  const grain = (x, y) => 0.8 + 0.12 * n1(x, y) + 0.06 * n2(x, y) + 0.14 * speck(x, y);
+  const layers = [
+    { depth: n - 0.6, alpha: () => 1, col: (x, y, out) => {
+      const m = 0.9 + 0.1 * n2(x, y) + 0.05 * speck(x, y); // paper-like mottling; also gives alignment something to hold at the edges
+      out[0] = backdrop[0] * m; out[1] = backdrop[1] * m; out[2] = backdrop[2] * m; } },
+  ].concat(shapes.map((sh, i) => {
+    const pal = palettes[i], ca = Math.cos(sh.angle), sa = Math.sin(sh.angle);
+    return {
+      depth: [n - 1.2, (n - 1) * 0.5, 0.1][i],
+      alpha: (x, y) => Math.min(1, Math.max(0, 0.5 - sh.sd(x, y))),
+      col: (x, y, out) => {
+        ramp(pal, 0.5 + ((x - sh.cx) * ca + (y - sh.cy) * sa) / (2 * sh.r) + 0.25 * (n3(x + i * 97, y) - 0.5), out);
+        const m = grain(x + i * 13, y);
+        out[0] *= m; out[1] *= m; out[2] *= m;
+      },
+    };
+  }));
   // Pre-render each layer's colour (premultiplied) and alpha.
   const L = layers.map((ly) => {
-    const a = new Float32Array(W * H), c = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
+    const a = new Float32Array(W * H), c = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)], col = [0, 0, 0];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (!ly.shape(x, y)) continue;
-      a[i] = 1;
-      const t = ly.tex(x, y);
-      for (let k = 0; k < 3; k++) c[k][i] = ly.color[k] * (0.25 + 1.1 * t);
+      const i = y * W + x, al = ly.alpha(x, y);
+      if (!al) continue;
+      a[i] = al;
+      ly.col(x, y, col);
+      for (let k = 0; k < 3; k++) c[k][i] = col[k] * al;
     }
     return { ly, a, c };
   });
@@ -2121,7 +2245,7 @@ return { handleMessage };
   let files = [];
   let busy = false;
   let lastResult = null; // {demo, preview, depth, frames, ...}
-  let view = 'image';
+  let view = 'compare', cmpPos = 50;
   let demoCount = 0;
   let wakeLock = null;
   let timer = null;
@@ -2323,7 +2447,7 @@ return { handleMessage };
     $('demoBadge').hidden = !m.demo;
     const now = new Date();
     $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
-    $('tabFirst').hidden = !m.first;
+    $('tabCompare').hidden = !m.first;
     $('zoombox').hidden = true;
     drawView();
     $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);
@@ -2364,19 +2488,71 @@ return { handleMessage };
 
   function drawView() {
     if (!lastResult) return;
-    if (view === 'first' && !lastResult.first) view = 'image';
-    const src = view === 'image' ? lastResult.preview : view === 'first' ? lastResult.first : lastResult.depth;
+    if (view === 'compare' && !lastResult.first) view = 'image';
+    const src = view === 'depth' ? lastResult.depth : lastResult.preview;
     const c = $('view');
     c.width = src.w; c.height = src.h;
     c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.w, src.h), 0, 0);
-    $('viewTag').textContent = view === 'image' ? '合成結果' : view === 'first' ? '合成前（1枚目のみ）' : '深度マップ（色で使った写真を表示）';
-    for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
+    const comparing = view === 'compare';
+    if (comparing) {
+      // The first frame can differ from the result by a pixel or two; scale it onto the result's canvas.
+      const f = lastResult.first, b = $('viewBefore'), tmp = document.createElement('canvas');
+      tmp.width = f.w; tmp.height = f.h;
+      tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(f.data), f.w, f.h), 0, 0);
+      b.width = src.w; b.height = src.h;
+      b.getContext('2d').drawImage(tmp, 0, 0, src.w, src.h);
+    }
+    $('viewBefore').hidden = $('cmp').hidden = !comparing;
+    $('viewTag').hidden = comparing;
+    $('viewer').classList.toggle('comparing', comparing);
+    setCmp(cmpPos);
+    $('viewTag').textContent = view === 'image' ? '合成結果' : '深度マップ（色で使った写真を表示）';
+    for (const [id, v] of [['tabCompare', 'compare'], ['tabImage', 'image'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
     $('legend').hidden = view !== 'depth';
   }
 
-  for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).addEventListener('click', () => { view = v; drawView(); });
+  for (const [id, v] of [['tabCompare', 'compare'], ['tabImage', 'image'], ['tabDepth', 'depth']]) $(id).addEventListener('click', () => { view = v; drawView(); });
 
-  $('view').addEventListener('click', (e) => {
+  // Before|After divider: drag anywhere on the image (horizontal moves), or use the arrow keys on the divider.
+  function setCmp(p) {
+    cmpPos = Math.min(100, Math.max(0, p));
+    $('viewer').style.setProperty('--pos', cmpPos + '%');
+    $('cmpLine').setAttribute('aria-valuenow', String(Math.round(cmpPos)));
+    document.querySelector('.cmp-l').style.opacity = cmpPos < 30 ? 0 : 1; // keep labels clear of the divider
+    document.querySelector('.cmp-r').style.opacity = cmpPos > 70 ? 0 : 1;
+  }
+  let drag = null, dragged = false;
+  $('viewer').addEventListener('pointerdown', (e) => {
+    if (view !== 'compare') return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, onLine: e.target.closest('.cmp-line') != null };
+    dragged = false;
+    if (drag.onLine) { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }
+  });
+  $('viewer').addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!dragged && !drag.onLine) {
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 6) { drag = null; return; } // vertical: let the page scroll
+      if (Math.abs(dx) < 6) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    dragged = true;
+    const r = e.currentTarget.getBoundingClientRect();
+    setCmp((e.clientX - r.left) / r.width * 100);
+  });
+  const endDrag = () => { drag = null; };
+  $('viewer').addEventListener('pointerup', endDrag);
+  $('viewer').addEventListener('pointercancel', endDrag);
+  $('cmpLine').addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 10 : 2;
+    if (e.key === 'ArrowLeft') setCmp(cmpPos - step); else if (e.key === 'ArrowRight') setCmp(cmpPos + step);
+    else if (e.key === 'Home') setCmp(0); else if (e.key === 'End') setCmp(100); else return;
+    e.preventDefault();
+  });
+
+  $('viewer').addEventListener('click', (e) => {
+    if (dragged) { dragged = false; return; }
+    if (e.target.closest('.cmp-line') || !e.target.closest('canvas')) return;
     if (!lastResult || busy) return;
     const r = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
@@ -2448,6 +2624,32 @@ return { handleMessage };
       buttons.forEach((b) => (b.disabled = false));
     }
   }));
+
+  // Phrase-aware line breaks for browsers without word-break: auto-phrase (Safari, Firefox):
+  // allow a break only where a run of kana/punctuation ends and a new word starts.
+  function phraseBreaks(root) {
+    if (typeof Intl === 'undefined' || !Intl.Segmenter || CSS.supports('word-break', 'auto-phrase')) return;
+    const seg = new Intl.Segmenter('ja', { granularity: 'word' });
+    const tail = /[\u3041-\u309f、。，．）」』！？・ー]$/, head = /^[^\u3041-\u309f、。，．）」』！？・ー\s]/;
+    root.querySelectorAll('.lede, .hint, .drop span, .field small, .check, details li, footer p, .exports button span, .notice').forEach((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        const parts = []; let cur = '';
+        for (const { segment } of seg.segment(node.data)) {
+          if (cur && tail.test(cur) && head.test(segment)) { parts.push(cur); cur = ''; }
+          cur += segment;
+        }
+        parts.push(cur);
+        if (parts.length < 2) continue;
+        const frag = document.createDocumentFragment();
+        parts.forEach((t, i) => { if (i) frag.appendChild(document.createElement('wbr')); frag.appendChild(document.createTextNode(t)); });
+        node.replaceWith(frag);
+      }
+      el.classList.add('ph');
+    });
+  }
+  phraseBreaks(document);
 
   renderFiles();
   // Open in a working state: run the small built-in sample once.

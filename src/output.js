@@ -251,10 +251,12 @@ function makeZip(files) { // [{name, data: Uint8Array}] -> Blob
 // Renders layered textured objects at different depths, blurs each layer according to the
 // focus position of each frame, adds slight focus breathing and noise, and stores Bayer DNGs.
 function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
-  let s = seed >>> 0;
+  let s = Math.imul(seed >>> 0, 2654435761) >>> 0; // spread nearby seeds apart
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 0; i < 4; i++) rnd();
   const noiseTex = (cell) => {
-    const gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+    // Margin so per-shape offsets (< 600 px) never reach the wrap-around seam.
+    const gw = Math.ceil((W + 600) / cell) + 2, gh = Math.ceil((H + 600) / cell) + 2;
     const g = new Float32Array(gw * gh).map(() => rnd());
     return (x, y) => {
       const fx = x / cell, fy = y / cell, xi = Math.floor(fx), yi = Math.floor(fy), ax = fx - xi, ay = fy - yi;
@@ -263,26 +265,119 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
       return (g[i] * (1 - ax) + g[i + 1] * ax) * (1 - ay) + (g[i + gw] * (1 - ax) + g[i + gw + 1] * ax) * ay;
     };
   };
-  const n1 = noiseTex(3), n2 = noiseTex(11), n3 = noiseTex(37);
-  // Layers from far (index 0) to near. depth in "frame units".
-  // Object placement varies with the seed so each sample looks different.
-  const j = () => (rnd() - 0.5) * 0.12;
-  const ex = 0.70 + j(), ey = 0.42 + j(), rx = 0.40 + j(), ry = 0.55 + j(), cx0 = 0.17 + j() * 0.5, cy0 = 0.70 + j();
-  const layers = [
-    { depth: n - 0.6, color: [0.10, 0.22, 0.12], shape: () => 1, tex: (x, y) => 0.25 + 0.5 * n2(x, y) + 0.35 * n1(x * 0.7, y * 0.7) * n3(x, y) },
-    { depth: n * 0.62, color: [0.55, 0.32, 0.12], shape: (x, y) => ((x - W * ex) ** 2 / (W * 0.20) ** 2 + (y - H * ey) ** 2 / (H * 0.36) ** 2) < 1, tex: (x, y) => 0.3 + 0.7 * n1(x, y) * (0.5 + 0.5 * n2(x * 2, y * 2)) },
-    { depth: n * 0.32, color: [0.75, 0.62, 0.20], shape: (x, y) => Math.abs(x - W * rx) < W * 0.12 && Math.abs(y - H * ry) < H * 0.32, tex: (x, y) => ((Math.floor(x / 6) + Math.floor(y / 6)) & 1 ? 1 : 0.35) * (0.7 + 0.3 * n3(x, y)) },
-    { depth: 0.2, color: [0.62, 0.18, 0.28], shape: (x, y) => ((x - W * cx0) ** 2 + (y - H * cy0) ** 2) < (H * 0.20) ** 2, tex: (x, y) => 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(Math.hypot(x - W * cx0, y - H * cy0) * 0.6)) * n1(x * 1.3, y * 1.3) },
+  const n1 = noiseTex(2), n2 = noiseTex(9), n3 = noiseTex(60), n4 = noiseTex(140);
+  // Scene: three grainy gradient shapes on a plain backdrop. Lightness steps with depth (far = dark, near = light)
+  // so the layers stay distinct in greyscale; hues stay within one family for a coherent palette.
+  const oklch = (L, C, h) => { // OKLCH → linear sRGB, reducing chroma until it fits the gamut
+    for (let c = C; ; c *= 0.9) {
+      const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+      const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+      if (c < 0.005 || rgb.every((v) => v >= 0 && v <= 1)) return rgb.map((v) => Math.min(1, Math.max(0, v)));
+    }
+  };
+  const hue = [20, 60, 150, 205, 255, 300, 345][Math.floor(rnd() * 7)];
+  const tones = [ // far → near: lightness, chroma, hue offset within the family
+    { L: 0.46, C: 0.13, dh: -28 }, { L: 0.66, C: 0.13, dh: 0 }, { L: 0.86, C: 0.10, dh: 28 },
   ];
+  const palettes = tones.map(({ L, C, dh }) => [-22, 0, 22].map((sp, k) => oklch(L + 0.035 * (1 - k), C, hue + dh + sp)));
+  const backdrop = oklch(0.25, 0.045, hue - 10);
+  const ramp = (stops, t, out) => {
+    t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i, ss = f * f * (3 - 2 * f), a = stops[i], b = stops[i + 1];
+    for (let k = 0; k < 3; k++) out[k] = a[k] + (b[k] - a[k]) * ss;
+  };
+  const S = Math.min(W, H);
+  // Signed distances (px, negative inside).
+  const sdCircle = (cx, cy, r) => (x, y) => Math.hypot(x - cx, y - cy) - r;
+  const sdBox = (cx, cy, hw, hh, rad, rot = 0) => { const c = Math.cos(rot), sn = Math.sin(rot); return (x, y) => {
+    const u = Math.abs((x - cx) * c + (y - cy) * sn) - hw + rad, v = Math.abs(-(x - cx) * sn + (y - cy) * c) - hh + rad;
+    return Math.hypot(Math.max(u, 0), Math.max(v, 0)) + Math.min(Math.max(u, v), 0) - rad; }; };
+  const sdTri = (cx, cy, r) => (x, y) => { // equilateral, point up, circumradius r
+    const k = Math.sqrt(3), px0 = (x - cx) / r, py0 = -(y - cy) / r - 0.0;
+    let px = Math.abs(px0) - 1 * k / 2, py = py0 + 0.5;
+    if (px + k * py > 0) { const t = px; px = (px - k * py) / 2; py = (-k * t - py) / 2; }
+    px -= Math.min(Math.max(px, -k), 0);
+    return -Math.hypot(px, py) * Math.sign(py) * r; };
+  const sdBars = (cx, cy, hw, hh, count, gap) => { const pitch = (2 * hh + gap), top = cy - (count - 1) * pitch / 2; return (x, y) => {
+    const k = Math.max(0, Math.min(count - 1, Math.round((y - top) / pitch)));
+    return sdBox(cx, top + k * pitch, hw, hh, hh)(x, y); }; };
+  const shape = (sd, cx, cy, r, angle) => ({ sd, cx, cy, r, angle });
+  // Keep every shape clear of the frame edge, where focus breathing leaves no data in the outer frames.
+  const keep = (v, r, len) => Math.min(len - r - 0.06 * S, Math.max(r + 0.06 * S, v));
+  // Three shapes (far, middle, near); which kinds appear changes with the seed.
+  // Each kind spans [-0.9r, 0.9r] vertically (so bottoms line up at cy + 0.9r); hw is its half-width in r.
+  const kinds = [
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.9, r * 0.9, S * 0.01), cx, cy, r, 0.6) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdCircle(cx, cy, r * 0.92), cx, cy, r, 0.8) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.65, r * 0.65, S * 0.008, Math.PI / 4), cx, cy, r, 0.7) },
+    { hw: 1.04, make: (cx, cy, r) => shape(sdTri(cx, cy + r * 0.3, r * 1.2), cx, cy, r, -0.5) },
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBars(cx, cy + r * 0.1, r * 0.9, r * 0.14, 4, r * 0.16), cx, cy, r, 0) },
+  ];
+  const bars = kinds[4];
+  for (let i = kinds.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [kinds[i], kinds[k]] = [kinds[k], kinds[i]]; }
+  if (kinds[2] === bars) [kinds[2], kinds[3]] = [kinds[3], kinds[2]]; // bars read better behind a solid shape
+  // Composed layouts. Every layout follows exactly one rule: the shapes overlap, or they stand side by side on
+  // one baseline. Either way the near shape is the largest, so size reads as depth. Mirrored at random.
+  const sizes = [0.20, 0.26, 0.32];
+  const overlapping = [ // centres (x in W, y in S) for far, middle, near
+    [[0.37, 0.33], [0.50, 0.50], [0.65, 0.64]], // diagonal cascade toward the viewer
+    [[0.50, 0.30], [0.34, 0.55], [0.64, 0.62]], // cluster: near shape in front of both
+    [[0.68, 0.30], [0.55, 0.47], [0.38, 0.63]], // receding diagonal into the top corner
+  ];
+  const pick = Math.floor(rnd() * (overlapping.length + 1)), flip = rnd() < 0.5;
+  let shapes;
+  if (pick < overlapping.length) {
+    shapes = overlapping[pick].map(([sx, sy], i) => {
+      const r = S * sizes[i], cx = keep(W * (flip ? 1 - sx : sx), r, W), cy = keep(H * 0.5 + (sy - 0.5) * S, r, H);
+      return kinds[i].make(cx, cy, r);
+    });
+  } else {
+    // Side by side on one baseline, equal gaps, the whole row centred; no shape touches another.
+    let rs = [0.18, 0.24, 0.31].map((f) => f * S);
+    const gap = 0.07 * W, avail = W - 2 * 0.08 * W - 2 * gap;
+    const need = rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0);
+    if (need > avail) rs = rs.map((r) => r * avail / need);
+    const order = flip ? [2, 1, 0] : [0, 1, 2], baseY = H * 0.5 + 0.9 * rs[2]; // the largest shape is centred vertically
+    let x = (W - (rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0) + 2 * gap)) / 2;
+    shapes = [];
+    for (const i of order) {
+      const w = kinds[i].hw * rs[i];
+      shapes[i] = kinds[i].make(x + w, baseY - 0.9 * rs[i], rs[i]);
+      x += 2 * w + gap;
+    }
+  }
+
+
+
+  // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
+  const speck = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
+  const grain = (x, y) => 0.8 + 0.12 * n1(x, y) + 0.06 * n2(x, y) + 0.14 * speck(x, y);
+  const layers = [
+    { depth: n - 0.6, alpha: () => 1, col: (x, y, out) => {
+      const m = 0.9 + 0.1 * n2(x, y) + 0.05 * speck(x, y); // paper-like mottling; also gives alignment something to hold at the edges
+      out[0] = backdrop[0] * m; out[1] = backdrop[1] * m; out[2] = backdrop[2] * m; } },
+  ].concat(shapes.map((sh, i) => {
+    const pal = palettes[i], ca = Math.cos(sh.angle), sa = Math.sin(sh.angle);
+    return {
+      depth: [n - 1.2, (n - 1) * 0.5, 0.1][i],
+      alpha: (x, y) => Math.min(1, Math.max(0, 0.5 - sh.sd(x, y))),
+      col: (x, y, out) => {
+        ramp(pal, 0.5 + ((x - sh.cx) * ca + (y - sh.cy) * sa) / (2 * sh.r) + 0.25 * (n3(x + i * 97, y) - 0.5), out);
+        const m = grain(x + i * 13, y);
+        out[0] *= m; out[1] *= m; out[2] *= m;
+      },
+    };
+  }));
   // Pre-render each layer's colour (premultiplied) and alpha.
   const L = layers.map((ly) => {
-    const a = new Float32Array(W * H), c = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
+    const a = new Float32Array(W * H), c = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)], col = [0, 0, 0];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (!ly.shape(x, y)) continue;
-      a[i] = 1;
-      const t = ly.tex(x, y);
-      for (let k = 0; k < 3; k++) c[k][i] = ly.color[k] * (0.25 + 1.1 * t);
+      const i = y * W + x, al = ly.alpha(x, y);
+      if (!al) continue;
+      a[i] = al;
+      ly.col(x, y, col);
+      for (let k = 0; k < 3; k++) c[k][i] = col[k] * al;
     }
     return { ly, a, c };
   });
