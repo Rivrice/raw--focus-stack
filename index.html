@@ -1203,7 +1203,9 @@ function downscaleLuma(img, w, h, k) {
         let o = (y * w + sx * k) * 3;
         for (let x = 0; x < k; x++, o += 3) s += img[o] + 2 * img[o + 1] + img[o + 2];
       }
-      out[sy * sw + sx] = Math.sqrt(s * inv);
+      // Linear (not gamma) luma: defocus blur is linear in scene light, so edges keep their position
+      // as focus changes and blur does not bias the scale (breathing) estimate.
+      out[sy * sw + sx] = s * inv;
     }
   }
   return { data: out, w: sw, h: sh };
@@ -1888,16 +1890,22 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
     };
   };
   const n1 = noiseTex(2), n2 = noiseTex(9), n3 = noiseTex(60), n4 = noiseTex(140);
-  // Scene: grainy gradient shapes on a pale pastel backdrop. Colours are sRGB stops, converted to linear.
-  const lin = (h) => [0, 2, 4].map((o) => { const v = parseInt(h.slice(o, o + 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
-  const palettes = [
-    ['e8104a', 'f7c6d4', '22c8e0', '0d6aa8'], // red → pink → cyan → blue
-    ['0e6f8a', '6fd6c0', 'ffd2a8', 'f0303a'], // teal → mint → peach → red
-    ['1238c8', '7aa0ff', 'ffc8a0', 'ff5418'], // blue → peach → orange
-    ['ee1078', 'ffc0d8', 'd8f5c0', '0f8a64'], // magenta → cream → green
-    ['5a2ee0', 'e8b0f0', 'ffd890', 'e8e020'], // violet → lilac → yellow
-  ].map((p) => p.map(lin));
-  for (let i = palettes.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [palettes[i], palettes[k]] = [palettes[k], palettes[i]]; }
+  // Scene: three grainy gradient shapes on a plain backdrop. Lightness steps with depth (far = dark, near = light)
+  // so the layers stay distinct in greyscale; hues stay within one family for a coherent palette.
+  const oklch = (L, C, h) => { // OKLCH → linear sRGB, reducing chroma until it fits the gamut
+    for (let c = C; ; c *= 0.9) {
+      const a = c * Math.cos(h * Math.PI / 180), b = c * Math.sin(h * Math.PI / 180);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+      const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+      if (c < 0.005 || rgb.every((v) => v >= 0 && v <= 1)) return rgb.map((v) => Math.min(1, Math.max(0, v)));
+    }
+  };
+  const hue = [20, 60, 150, 205, 255, 300, 345][Math.floor(rnd() * 7)];
+  const tones = [ // far → near: lightness, chroma, hue offset within the family
+    { L: 0.46, C: 0.13, dh: -28 }, { L: 0.66, C: 0.13, dh: 0 }, { L: 0.86, C: 0.10, dh: 28 },
+  ];
+  const palettes = tones.map(({ L, C, dh }) => [-22, 0, 22].map((sp, k) => oklch(L + 0.035 * (1 - k), C, hue + dh + sp)));
+  const backdrop = oklch(0.27, 0.05, hue - 40);
   const ramp = (stops, t, out) => {
     t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
     const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i, ss = f * f * (3 - 2 * f), a = stops[i], b = stops[i + 1];
@@ -1940,20 +1948,10 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
   // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
   const speck = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
   const grain = (x, y) => 0.8 + 0.12 * n1(x, y) + 0.06 * n2(x, y) + 0.14 * speck(x, y);
-  // Backdrop: warm off-white with a few large, soft pastel blooms.
-  const base = lin('fff8ef');
-  const blooms = ['ffd2b0', 'fbbcd6', 'c4d6ff', 'e2c8f4', 'ffe2a8'].map((h) => ({
-    c: lin(h), x: W * rnd(), y: H * rnd(), r: S * (0.25 + 0.25 * rnd()),
-  }));
   const layers = [
     { depth: n - 0.6, alpha: () => 1, col: (x, y, out) => {
-      let r = base[0], g = base[1], b = base[2];
-      for (const bl of blooms) {
-        const w = 0.85 * Math.exp(-((x - bl.x) ** 2 + (y - bl.y) ** 2) / (bl.r * bl.r));
-        r += (bl.c[0] - r) * w; g += (bl.c[1] - g) * w; b += (bl.c[2] - b) * w;
-      }
-      const m = 0.95 * (0.95 + 0.05 * grain(x, y));
-      out[0] = r * m; out[1] = g * m; out[2] = b * m; } },
+      const m = 0.9 + 0.1 * n2(x, y) + 0.05 * speck(x, y); // paper-like mottling; also gives alignment something to hold at the edges
+      out[0] = backdrop[0] * m; out[1] = backdrop[1] * m; out[2] = backdrop[2] * m; } },
   ].concat(shapes.map((sh, i) => {
     const pal = palettes[i], ca = Math.cos(sh.angle), sa = Math.sin(sh.angle);
     return {
@@ -1961,7 +1959,7 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
       alpha: (x, y) => Math.min(1, Math.max(0, 0.5 - sh.sd(x, y))),
       col: (x, y, out) => {
         ramp(pal, 0.5 + ((x - sh.cx) * ca + (y - sh.cy) * sa) / (2 * sh.r) + 0.25 * (n3(x + i * 97, y) - 0.5), out);
-        const m = 0.8 * grain(x + i * 13, y);
+        const m = grain(x + i * 13, y);
         out[0] *= m; out[1] *= m; out[2] *= m;
       },
     };

@@ -13,7 +13,9 @@ function downscaleLuma(img, w, h, k) {
         let o = (y * w + sx * k) * 3;
         for (let x = 0; x < k; x++, o += 3) s += img[o] + 2 * img[o + 1] + img[o + 2];
       }
-      out[sy * sw + sx] = Math.sqrt(s * inv);
+      // Linear (not gamma) luma: defocus blur is linear in scene light, so edges keep their position
+      // as focus changes and blur does not bias the scale (breathing) estimate.
+      out[sy * sw + sx] = s * inv;
     }
   }
   return { data: out, w: sw, h: sh };
