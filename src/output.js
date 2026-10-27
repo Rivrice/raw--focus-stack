@@ -82,29 +82,49 @@ function u16Strips(data, w, h, spp, rowsPerStrip) {
 }
 
 // Linear (demosaiced) DNG in the camera's colour space, so raw editors keep full WB / colour control.
+// Stored as 14-bit samples in 256x256 lossless-JPEG tiles (as Apple ProRAW does); source RAWs
+// carry at most 14 bits, so nothing is lost while the file shrinks to a fraction of the
+// uncompressed 16-bit size.
+const DNG_TILE = 256, DNG_BITS = 14;
 function writeLinearDNG(data, w, h, meta, extra = {}) {
+  return writeStackDNG(data, w, h, meta, Object.assign({}, extra, { cfa: false }));
+}
+
+// Writes the stack as a DNG. When the source was a Bayer RAW processed at full size, the result is
+// re-mosaiced onto the original colour filter pattern: one sample per pixel, so the file is about
+// the size of one source RAW and the raw editor demosaics it itself. Otherwise a LinearRaw DNG
+// (three samples per pixel) is written.
+function writeStackDNG(data, w, h, meta, extra = {}) {
+  const pat = extra.cfa !== false && meta.cfaPattern && !(w & 1) && !(h & 1) ? meta.cfaPattern : null;
   const e = [];
   const add = (tag, type, values) => { if (values != null && (typeof values === 'string' || values.length)) e.push({ tag, type, values }); };
+  const maxV = (1 << DNG_BITS) - 1, shift = 16 - DNG_BITS;
   add(TAG.NewSubFileType, 4, [0]);
   add(TAG.ImageWidth, 4, [w]);
   add(TAG.ImageLength, 4, [h]);
-  add(TAG.BitsPerSample, 3, [16, 16, 16]);
-  add(TAG.Compression, 3, [1]);
-  add(TAG.Photometric, 3, [34892]);
+  add(TAG.BitsPerSample, 3, pat ? [DNG_BITS] : [DNG_BITS, DNG_BITS, DNG_BITS]);
+  add(TAG.Compression, 3, [7]);
+  add(TAG.Photometric, 3, [pat ? 32803 : 34892]);
   if (meta.make) add(TAG.Make, 2, meta.make);
   if (meta.model) add(TAG.Model, 2, meta.model);
   add(TAG.Orientation, 3, [meta.orientation || 1]);
-  add(TAG.SamplesPerPixel, 3, [3]);
-  const rps = Math.max(1, Math.floor(262144 / (w * 6)));
-  add(TAG.RowsPerStrip, 4, [rps]);
+  add(TAG.SamplesPerPixel, 3, [pat ? 1 : 3]);
   add(TAG.PlanarConfig, 3, [1]);
+  if (pat) {
+    add(TAG.CFARepeatPatternDim, 3, [2, 2]);
+    add(TAG.CFAPattern, 1, pat);
+    add(TAG.CFAPlaneColor, 1, [0, 1, 2]);
+    add(TAG.CFALayout, 3, [1]);
+  }
+  add(TAG.TileWidth, 4, [DNG_TILE]);
+  add(TAG.TileLength, 4, [DNG_TILE]);
   add(TAG.Software, 2, extra.software || 'RAW Focus Stacker');
   if (meta.dateTime) add(TAG.DateTime, 2, meta.dateTime);
   add(TAG.DNGVersion, 1, [1, 4, 0, 0]);
   add(TAG.DNGBackwardVersion, 1, [1, 1, 0, 0]);
   add(TAG.UniqueCameraModel, 2, meta.uniqueModel || 'Focus stack');
-  add(TAG.WhiteLevel, 4, [65535, 65535, 65535]);
-  add(TAG.BlackLevel, 3, [0, 0, 0]);
+  add(TAG.WhiteLevel, 4, pat ? [maxV] : [maxV, maxV, maxV]);
+  add(TAG.BlackLevel, 3, pat ? [0] : [0, 0, 0]);
   const cm1 = meta.colorMatrix1 || mat3inv(XYZ_FROM_SRGB);
   add(TAG.ColorMatrix1, 10, cm1);
   add(TAG.CalibrationIlluminant1, 3, [meta.colorMatrix1 ? meta.illuminant1 || 21 : 21]);
@@ -117,21 +137,72 @@ function writeLinearDNG(data, w, h, meta, extra = {}) {
   if (meta.asShotNeutral) add(TAG.AsShotNeutral, 5, meta.asShotNeutral);
   else if (meta.asShotWhiteXY) add(TAG.AsShotWhiteXY, 5, meta.asShotWhiteXY);
   add(TAG.BaselineExposure, 10, [meta.baselineExposure || 0]);
-  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+
+  const T = DNG_TILE, tiles = [];
+  if (pat) {
+    // Bayer tiles are coded as T/2 x T two-component frames so each sample is predicted from the
+    // same colour two pixels to its left.
+    const tile = new Uint16Array(T * T);
+    for (let ty = 0; ty < h; ty += T) {
+      for (let tx = 0; tx < w; tx += T) {
+        for (let y = 0; y < T; y++) {
+          let sy = ty + y; if (sy >= h) sy -= 2 * Math.ceil((sy - h + 1) / 2); // stay on the same CFA row phase
+          const rowPat = (sy & 1) << 1;
+          for (let x = 0; x < T; x++) {
+            let sx = tx + x; if (sx >= w) sx -= 2 * Math.ceil((sx - w + 1) / 2);
+            tile[y * T + x] = data[(sy * w + sx) * 3 + pat[rowPat | (sx & 1)]] >> shift;
+          }
+        }
+        tiles.push(encodeLJ92(tile, T / 2, T, 2, DNG_BITS).slice());
+      }
+    }
+    return writeTiff(e, tiles, { tiled: true });
+  }
+  const tile = new Uint16Array(T * T * 3);
+  for (let ty = 0; ty < h; ty += T) {
+    for (let tx = 0; tx < w; tx += T) {
+      // Copy the tile, repeating the last row/column past the image edge.
+      for (let y = 0; y < T; y++) {
+        const sy = Math.min(h - 1, ty + y);
+        for (let x = 0; x < T; x++) {
+          const si = (sy * w + Math.min(w - 1, tx + x)) * 3, di = (y * T + x) * 3;
+          tile[di] = data[si] >> shift; tile[di + 1] = data[si + 1] >> shift; tile[di + 2] = data[si + 2] >> shift;
+        }
+      }
+      tiles.push(encodeLJ92(tile, T, T, 3, DNG_BITS).slice());
+    }
+  }
+  return writeTiff(e, tiles, { tiled: true });
 }
 
-// 16-bit sRGB TIFF from rendered data (3 channels).
-function writeTiff16(data, w, h, software) {
+// 16-bit sRGB TIFF from rendered data (3 channels), Deflate-compressed with horizontal
+// differencing where the browser can compress (CompressionStream), otherwise uncompressed.
+async function writeTiff16(data, w, h, software) {
   const rps = Math.max(1, Math.floor(262144 / (w * 6)));
+  const canDeflate = typeof CompressionStream !== 'undefined';
   const e = [
     { tag: TAG.ImageWidth, type: 4, values: [w] }, { tag: TAG.ImageLength, type: 4, values: [h] },
-    { tag: TAG.BitsPerSample, type: 3, values: [16, 16, 16] }, { tag: TAG.Compression, type: 3, values: [1] },
+    { tag: TAG.BitsPerSample, type: 3, values: [16, 16, 16] }, { tag: TAG.Compression, type: 3, values: [canDeflate ? 8 : 1] },
     { tag: TAG.Photometric, type: 3, values: [2] }, { tag: TAG.SamplesPerPixel, type: 3, values: [3] },
     { tag: TAG.RowsPerStrip, type: 4, values: [rps] }, { tag: TAG.PlanarConfig, type: 3, values: [1] },
     { tag: TAG.Software, type: 2, values: software || 'RAW Focus Stacker' },
     { tag: 282, type: 5, values: [300] }, { tag: 283, type: 5, values: [300] }, { tag: 296, type: 3, values: [2] },
   ];
-  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+  if (canDeflate) e.push({ tag: TAG.Predictor, type: 3, values: [2] });
+  const strips = u16Strips(data, w, h, 3, rps);
+  if (!canDeflate) return writeTiff(e, strips);
+  const out = [];
+  for (const s of strips) {
+    const v = new Uint16Array(s.buffer);
+    const rowLen = w * 3;
+    for (let r = v.length / rowLen - 1; r >= 0; r--) {
+      const o = r * rowLen;
+      for (let x = rowLen - 1; x >= 3; x--) v[o + x] = (v[o + x] - v[o + x - 3]) & 0xffff;
+    }
+    const cs = new CompressionStream('deflate');
+    out.push(new Uint8Array(await new Response(new Blob([s]).stream().pipeThrough(cs)).arrayBuffer()));
+  }
+  return writeTiff(e, out);
 }
 
 // ---- ZIP (store only) ----

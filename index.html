@@ -393,7 +393,8 @@ class TiffReader {
 // {tag, type, values} where values is an array of numbers, a string (ASCII),
 // or for rationals an array of numbers (converted with a fixed denominator).
 // Image data is supplied as one or more strips (Uint8Array).
-function writeTiff(entries, strips) {
+function writeTiff(entries, strips, opts = {}) {
+  const offTag = opts.tiled ? TAG.TileOffsets : TAG.StripOffsets, cntTag = opts.tiled ? TAG.TileByteCounts : TAG.StripByteCounts;
   const RAT_DEN = 1000000;
   const list = entries.slice().sort((a, b) => a.tag - b.tag);
   const n = list.length + 2; // + StripOffsets / StripByteCounts handled below
@@ -434,8 +435,8 @@ function writeTiff(entries, strips) {
     return { tag: e.tag, type: e.type, count: vals.length, bytes };
   });
   const stripCount = strips.length;
-  enc.push({ tag: TAG.StripOffsets, type: 4, count: stripCount, bytes: null, isOffsets: true });
-  enc.push({ tag: TAG.StripByteCounts, type: 4, count: stripCount, bytes: new Uint8Array(new Uint32Array(strips.map((s) => s.length)).buffer) });
+  enc.push({ tag: offTag, type: 4, count: stripCount, bytes: null, isOffsets: true });
+  enc.push({ tag: cntTag, type: 4, count: stripCount, bytes: new Uint8Array(new Uint32Array(strips.map((s) => s.length)).buffer) });
   enc.sort((a, b) => a.tag - b.tag);
 
   const ifdOff = 8;
@@ -634,6 +635,110 @@ function decodeScan(bytes, start, frame, tables, pred, pt, restart) {
   return { width: W, height: H, comps: C, bits: frame.bits, data: out };
 }
 
+// ---- Lossless JPEG encoder (predictor 1, one optimised Huffman table shared by all components) ----
+// samples: Uint16Array, row-major interleaved, w x h x comps. Returns Uint8Array (SOI..EOI).
+function encodeLJ92(samples, w, h, comps, bits) {
+  const rowLen = w * comps;
+  const n = w * h * comps;
+  const ssss = new Uint8Array(n);
+  const diffs = new Int32Array(n);
+  const freq = new Uint32Array(17);
+  const init = 1 << (bits - 1);
+  for (let y = 0; y < h; y++) {
+    const ro = y * rowLen;
+    for (let x = 0; x < rowLen; x++) {
+      const i = ro + x;
+      const p = y === 0 ? (x < comps ? init : samples[i - comps]) : (x < comps ? samples[i - rowLen] : samples[i - comps]);
+      let d = (samples[i] - p) & 0xffff;
+      if (d >= 32768) d -= 65536;
+      let s;
+      if (d === -32768) s = 16;
+      else { let a = d < 0 ? -d : d; s = 0; while (a) { s++; a >>= 1; } }
+      ssss[i] = s; diffs[i] = d; freq[s]++;
+    }
+  }
+  const { counts, symbols, codes, lens } = buildHuffmanTable(freq);
+  // Header
+  const head = [];
+  const put16 = (v) => head.push((v >> 8) & 255, v & 255);
+  put16(0xffd8);
+  put16(0xffc3); put16(8 + 3 * comps); head.push(bits); put16(h); put16(w); head.push(comps);
+  for (let c = 0; c < comps; c++) head.push(c + 1, 0x11, 0);
+  put16(0xffc4); put16(2 + 1 + 16 + symbols.length); head.push(0); for (let i = 0; i < 16; i++) head.push(counts[i]); head.push(...symbols);
+  put16(0xffda); put16(6 + 2 * comps); head.push(comps); for (let c = 0; c < comps; c++) head.push(c + 1, 0); head.push(1, 0, 0);
+  // Entropy-coded data (worst case ~ 32 bits per sample + stuffing)
+  let out = new Uint8Array(head.length + Math.ceil(n * 2.2) + 1024);
+  out.set(head);
+  let pos = head.length;
+  let acc = 0, cnt = 0;
+  const ensure = () => { if (pos + 16 > out.length) { const o = new Uint8Array(out.length * 2); o.set(out); out = o; } };
+  const emit = (v, l) => {
+    // l <= 16; keep acc below 32 bits
+    acc = (acc << l) | (v & ((1 << l) - 1));
+    cnt += l;
+    while (cnt >= 8) {
+      cnt -= 8;
+      const b = (acc >>> cnt) & 255;
+      out[pos++] = b;
+      if (b === 0xff) out[pos++] = 0;
+    }
+    acc &= (1 << cnt) - 1;
+  };
+  for (let i = 0; i < n; i++) {
+    if ((i & 4095) === 0) ensure();
+    if (pos + 16 > out.length) ensure();
+    const s = ssss[i];
+    emit(codes[s], lens[s]);
+    if (s && s < 16) { const d = diffs[i]; emit(d < 0 ? d + (1 << s) - 1 : d, s); }
+  }
+  if (cnt) emit(0x7f, 8 - cnt);
+  ensure();
+  out[pos++] = 0xff; out[pos++] = 0xd9;
+  return out.subarray(0, pos);
+}
+
+// JPEG Annex K.2: code lengths from frequencies, limited to 16 bits; returns canonical codes.
+function buildHuffmanTable(freqIn) {
+  const freq = new Float64Array(257);
+  for (let i = 0; i < 17; i++) freq[i] = freqIn[i];
+  freq[256] = 1; // reserved so no code is all ones
+  const codesize = new Int32Array(257), others = new Int32Array(257).fill(-1);
+  for (;;) {
+    let c1 = -1, c2 = -1, v = Infinity;
+    for (let i = 0; i <= 256; i++) if (freq[i] && freq[i] <= v) { v = freq[i]; c1 = i; }
+    v = Infinity;
+    for (let i = 0; i <= 256; i++) if (freq[i] && freq[i] <= v && i !== c1) { v = freq[i]; c2 = i; }
+    if (c2 < 0) break;
+    freq[c1] += freq[c2]; freq[c2] = 0;
+    codesize[c1]++; while (others[c1] >= 0) { c1 = others[c1]; codesize[c1]++; }
+    others[c1] = c2;
+    codesize[c2]++; while (others[c2] >= 0) { c2 = others[c2]; codesize[c2]++; }
+  }
+  const bitsArr = new Int32Array(33);
+  for (let i = 0; i <= 256; i++) if (codesize[i]) bitsArr[codesize[i]]++;
+  for (let i = 32; i > 16; i--) {
+    while (bitsArr[i] > 0) {
+      let j = i - 2; while (bitsArr[j] === 0) j--;
+      bitsArr[i] -= 2; bitsArr[i - 1]++; bitsArr[j + 1] += 2; bitsArr[j]--;
+    }
+  }
+  let i = 16; while (bitsArr[i] === 0) i--;
+  bitsArr[i]--; // remove reserved symbol
+  const counts = new Uint8Array(16);
+  for (let k = 1; k <= 16; k++) counts[k - 1] = bitsArr[k];
+  // Symbols sorted by code size (then value), excluding the reserved 256.
+  const symbols = [];
+  for (let len = 1; len <= 32; len++) for (let s = 0; s < 17; s++) if (codesize[s] === len) symbols.push(s);
+  // Assign canonical codes following `counts` order.
+  const codes = new Uint16Array(17), lens = new Uint8Array(17);
+  let code = 0, k = 0;
+  for (let len = 1; len <= 16; len++) {
+    for (let c = 0; c < counts[len - 1]; c++) { const s = symbols[k++]; codes[s] = code++; lens[s] = len; }
+    code <<= 1;
+  }
+  return { counts, symbols: symbols.slice(0, k), codes, lens };
+}
+
 // ---- DNG decoding: raw samples -> normalized linear camera RGB (Uint16, 0..65535) ----
 
 const XYZ_FROM_SRGB = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
@@ -747,6 +852,7 @@ async function decodeDNG(buffer, opts = {}) {
   let out, ow, oh;
   if (isCFA) {
     const pat = cfaPattern(r, ifd);
+    if (!opts.half) meta.cfaPattern = pat;
     if (opts.half) { ({ out, ow, oh } = superpixel(norm, aw, ah, pat)); }
     else { out = demosaicEdge(norm, aw, ah, pat); ow = aw; oh = ah; }
   } else if (opts.half) {
@@ -1587,29 +1693,49 @@ function u16Strips(data, w, h, spp, rowsPerStrip) {
 }
 
 // Linear (demosaiced) DNG in the camera's colour space, so raw editors keep full WB / colour control.
+// Stored as 14-bit samples in 256x256 lossless-JPEG tiles (as Apple ProRAW does); source RAWs
+// carry at most 14 bits, so nothing is lost while the file shrinks to a fraction of the
+// uncompressed 16-bit size.
+const DNG_TILE = 256, DNG_BITS = 14;
 function writeLinearDNG(data, w, h, meta, extra = {}) {
+  return writeStackDNG(data, w, h, meta, Object.assign({}, extra, { cfa: false }));
+}
+
+// Writes the stack as a DNG. When the source was a Bayer RAW processed at full size, the result is
+// re-mosaiced onto the original colour filter pattern: one sample per pixel, so the file is about
+// the size of one source RAW and the raw editor demosaics it itself. Otherwise a LinearRaw DNG
+// (three samples per pixel) is written.
+function writeStackDNG(data, w, h, meta, extra = {}) {
+  const pat = extra.cfa !== false && meta.cfaPattern && !(w & 1) && !(h & 1) ? meta.cfaPattern : null;
   const e = [];
   const add = (tag, type, values) => { if (values != null && (typeof values === 'string' || values.length)) e.push({ tag, type, values }); };
+  const maxV = (1 << DNG_BITS) - 1, shift = 16 - DNG_BITS;
   add(TAG.NewSubFileType, 4, [0]);
   add(TAG.ImageWidth, 4, [w]);
   add(TAG.ImageLength, 4, [h]);
-  add(TAG.BitsPerSample, 3, [16, 16, 16]);
-  add(TAG.Compression, 3, [1]);
-  add(TAG.Photometric, 3, [34892]);
+  add(TAG.BitsPerSample, 3, pat ? [DNG_BITS] : [DNG_BITS, DNG_BITS, DNG_BITS]);
+  add(TAG.Compression, 3, [7]);
+  add(TAG.Photometric, 3, [pat ? 32803 : 34892]);
   if (meta.make) add(TAG.Make, 2, meta.make);
   if (meta.model) add(TAG.Model, 2, meta.model);
   add(TAG.Orientation, 3, [meta.orientation || 1]);
-  add(TAG.SamplesPerPixel, 3, [3]);
-  const rps = Math.max(1, Math.floor(262144 / (w * 6)));
-  add(TAG.RowsPerStrip, 4, [rps]);
+  add(TAG.SamplesPerPixel, 3, [pat ? 1 : 3]);
   add(TAG.PlanarConfig, 3, [1]);
+  if (pat) {
+    add(TAG.CFARepeatPatternDim, 3, [2, 2]);
+    add(TAG.CFAPattern, 1, pat);
+    add(TAG.CFAPlaneColor, 1, [0, 1, 2]);
+    add(TAG.CFALayout, 3, [1]);
+  }
+  add(TAG.TileWidth, 4, [DNG_TILE]);
+  add(TAG.TileLength, 4, [DNG_TILE]);
   add(TAG.Software, 2, extra.software || 'RAW Focus Stacker');
   if (meta.dateTime) add(TAG.DateTime, 2, meta.dateTime);
   add(TAG.DNGVersion, 1, [1, 4, 0, 0]);
   add(TAG.DNGBackwardVersion, 1, [1, 1, 0, 0]);
   add(TAG.UniqueCameraModel, 2, meta.uniqueModel || 'Focus stack');
-  add(TAG.WhiteLevel, 4, [65535, 65535, 65535]);
-  add(TAG.BlackLevel, 3, [0, 0, 0]);
+  add(TAG.WhiteLevel, 4, pat ? [maxV] : [maxV, maxV, maxV]);
+  add(TAG.BlackLevel, 3, pat ? [0] : [0, 0, 0]);
   const cm1 = meta.colorMatrix1 || mat3inv(XYZ_FROM_SRGB);
   add(TAG.ColorMatrix1, 10, cm1);
   add(TAG.CalibrationIlluminant1, 3, [meta.colorMatrix1 ? meta.illuminant1 || 21 : 21]);
@@ -1622,21 +1748,72 @@ function writeLinearDNG(data, w, h, meta, extra = {}) {
   if (meta.asShotNeutral) add(TAG.AsShotNeutral, 5, meta.asShotNeutral);
   else if (meta.asShotWhiteXY) add(TAG.AsShotWhiteXY, 5, meta.asShotWhiteXY);
   add(TAG.BaselineExposure, 10, [meta.baselineExposure || 0]);
-  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+
+  const T = DNG_TILE, tiles = [];
+  if (pat) {
+    // Bayer tiles are coded as T/2 x T two-component frames so each sample is predicted from the
+    // same colour two pixels to its left.
+    const tile = new Uint16Array(T * T);
+    for (let ty = 0; ty < h; ty += T) {
+      for (let tx = 0; tx < w; tx += T) {
+        for (let y = 0; y < T; y++) {
+          let sy = ty + y; if (sy >= h) sy -= 2 * Math.ceil((sy - h + 1) / 2); // stay on the same CFA row phase
+          const rowPat = (sy & 1) << 1;
+          for (let x = 0; x < T; x++) {
+            let sx = tx + x; if (sx >= w) sx -= 2 * Math.ceil((sx - w + 1) / 2);
+            tile[y * T + x] = data[(sy * w + sx) * 3 + pat[rowPat | (sx & 1)]] >> shift;
+          }
+        }
+        tiles.push(encodeLJ92(tile, T / 2, T, 2, DNG_BITS).slice());
+      }
+    }
+    return writeTiff(e, tiles, { tiled: true });
+  }
+  const tile = new Uint16Array(T * T * 3);
+  for (let ty = 0; ty < h; ty += T) {
+    for (let tx = 0; tx < w; tx += T) {
+      // Copy the tile, repeating the last row/column past the image edge.
+      for (let y = 0; y < T; y++) {
+        const sy = Math.min(h - 1, ty + y);
+        for (let x = 0; x < T; x++) {
+          const si = (sy * w + Math.min(w - 1, tx + x)) * 3, di = (y * T + x) * 3;
+          tile[di] = data[si] >> shift; tile[di + 1] = data[si + 1] >> shift; tile[di + 2] = data[si + 2] >> shift;
+        }
+      }
+      tiles.push(encodeLJ92(tile, T, T, 3, DNG_BITS).slice());
+    }
+  }
+  return writeTiff(e, tiles, { tiled: true });
 }
 
-// 16-bit sRGB TIFF from rendered data (3 channels).
-function writeTiff16(data, w, h, software) {
+// 16-bit sRGB TIFF from rendered data (3 channels), Deflate-compressed with horizontal
+// differencing where the browser can compress (CompressionStream), otherwise uncompressed.
+async function writeTiff16(data, w, h, software) {
   const rps = Math.max(1, Math.floor(262144 / (w * 6)));
+  const canDeflate = typeof CompressionStream !== 'undefined';
   const e = [
     { tag: TAG.ImageWidth, type: 4, values: [w] }, { tag: TAG.ImageLength, type: 4, values: [h] },
-    { tag: TAG.BitsPerSample, type: 3, values: [16, 16, 16] }, { tag: TAG.Compression, type: 3, values: [1] },
+    { tag: TAG.BitsPerSample, type: 3, values: [16, 16, 16] }, { tag: TAG.Compression, type: 3, values: [canDeflate ? 8 : 1] },
     { tag: TAG.Photometric, type: 3, values: [2] }, { tag: TAG.SamplesPerPixel, type: 3, values: [3] },
     { tag: TAG.RowsPerStrip, type: 4, values: [rps] }, { tag: TAG.PlanarConfig, type: 3, values: [1] },
     { tag: TAG.Software, type: 2, values: software || 'RAW Focus Stacker' },
     { tag: 282, type: 5, values: [300] }, { tag: 283, type: 5, values: [300] }, { tag: 296, type: 3, values: [2] },
   ];
-  return writeTiff(e, u16Strips(data, w, h, 3, rps));
+  if (canDeflate) e.push({ tag: TAG.Predictor, type: 3, values: [2] });
+  const strips = u16Strips(data, w, h, 3, rps);
+  if (!canDeflate) return writeTiff(e, strips);
+  const out = [];
+  for (const s of strips) {
+    const v = new Uint16Array(s.buffer);
+    const rowLen = w * 3;
+    for (let r = v.length / rowLen - 1; r >= 0; r--) {
+      const o = r * rowLen;
+      for (let x = rowLen - 1; x >= 3; x--) v[o + x] = (v[o + x] - v[o + x - 3]) & 0xffff;
+    }
+    const cs = new CompressionStream('deflate');
+    out.push(new Uint8Array(await new Response(new Blob([s]).stream().pipeThrough(cs)).arrayBuffer()));
+  }
+  return writeTiff(e, out);
 }
 
 // ---- ZIP (store only) ----
@@ -1907,11 +2084,11 @@ async function handleMessage(msg, post) {
       const base = (msg.demo ? 'sample-stack-' : 'focus-stack-') + stamp();
       let bytes, name, rgba = null;
       if (msg.format === 'dng') {
-        bytes = writeLinearDNG(res.data, res.width, res.height, res.meta);
+        bytes = writeStackDNG(res.data, res.width, res.height, res.meta);
         name = base + '.dng';
       } else if (msg.format === 'tiff') {
         const r16 = renderImage(res.data, res.width, res.height, state.rt, { bits: 16, exposure: msg.exposure || 0, orientation: res.meta.orientation });
-        bytes = writeTiff16(r16.data, r16.w, r16.h);
+        bytes = await writeTiff16(r16.data, r16.w, r16.h);
         name = base + '.tif';
       } else {
         const r8 = renderImage(res.data, res.width, res.height, state.rt, { bits: 8, exposure: msg.exposure || 0, orientation: res.meta.orientation });

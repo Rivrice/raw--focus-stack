@@ -127,7 +127,8 @@ class TiffReader {
 // {tag, type, values} where values is an array of numbers, a string (ASCII),
 // or for rationals an array of numbers (converted with a fixed denominator).
 // Image data is supplied as one or more strips (Uint8Array).
-function writeTiff(entries, strips) {
+function writeTiff(entries, strips, opts = {}) {
+  const offTag = opts.tiled ? TAG.TileOffsets : TAG.StripOffsets, cntTag = opts.tiled ? TAG.TileByteCounts : TAG.StripByteCounts;
   const RAT_DEN = 1000000;
   const list = entries.slice().sort((a, b) => a.tag - b.tag);
   const n = list.length + 2; // + StripOffsets / StripByteCounts handled below
@@ -168,8 +169,8 @@ function writeTiff(entries, strips) {
     return { tag: e.tag, type: e.type, count: vals.length, bytes };
   });
   const stripCount = strips.length;
-  enc.push({ tag: TAG.StripOffsets, type: 4, count: stripCount, bytes: null, isOffsets: true });
-  enc.push({ tag: TAG.StripByteCounts, type: 4, count: stripCount, bytes: new Uint8Array(new Uint32Array(strips.map((s) => s.length)).buffer) });
+  enc.push({ tag: offTag, type: 4, count: stripCount, bytes: null, isOffsets: true });
+  enc.push({ tag: cntTag, type: 4, count: stripCount, bytes: new Uint8Array(new Uint32Array(strips.map((s) => s.length)).buffer) });
   enc.sort((a, b) => a.tag - b.tag);
 
   const ifdOff = 8;

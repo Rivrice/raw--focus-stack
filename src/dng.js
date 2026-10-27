@@ -111,6 +111,7 @@ async function decodeDNG(buffer, opts = {}) {
   let out, ow, oh;
   if (isCFA) {
     const pat = cfaPattern(r, ifd);
+    if (!opts.half) meta.cfaPattern = pat;
     if (opts.half) { ({ out, ow, oh } = superpixel(norm, aw, ah, pat)); }
     else { out = demosaicEdge(norm, aw, ah, pat); ow = aw; oh = ah; }
   } else if (opts.half) {
