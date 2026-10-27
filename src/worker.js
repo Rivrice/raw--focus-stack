@@ -134,11 +134,11 @@ async function handleMessage(msg, post) {
       const base = (msg.demo ? 'sample-stack-' : 'focus-stack-') + stamp();
       let bytes, name, rgba = null;
       if (msg.format === 'dng') {
-        bytes = writeLinearDNG(res.data, res.width, res.height, res.meta);
+        bytes = writeStackDNG(res.data, res.width, res.height, res.meta);
         name = base + '.dng';
       } else if (msg.format === 'tiff') {
         const r16 = renderImage(res.data, res.width, res.height, state.rt, { bits: 16, exposure: msg.exposure || 0, orientation: res.meta.orientation });
-        bytes = writeTiff16(r16.data, r16.w, r16.h);
+        bytes = await writeTiff16(r16.data, r16.w, r16.h);
         name = base + '.tif';
       } else {
         const r8 = renderImage(res.data, res.width, res.height, state.rt, { bits: 8, exposure: msg.exposure || 0, orientation: res.meta.orientation });

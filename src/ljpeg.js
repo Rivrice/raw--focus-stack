@@ -153,3 +153,107 @@ function decodeScan(bytes, start, frame, tables, pred, pt, restart) {
   if (pt) for (let i = 0; i < out.length; i++) out[i] <<= pt;
   return { width: W, height: H, comps: C, bits: frame.bits, data: out };
 }
+
+// ---- Lossless JPEG encoder (predictor 1, one optimised Huffman table shared by all components) ----
+// samples: Uint16Array, row-major interleaved, w x h x comps. Returns Uint8Array (SOI..EOI).
+function encodeLJ92(samples, w, h, comps, bits) {
+  const rowLen = w * comps;
+  const n = w * h * comps;
+  const ssss = new Uint8Array(n);
+  const diffs = new Int32Array(n);
+  const freq = new Uint32Array(17);
+  const init = 1 << (bits - 1);
+  for (let y = 0; y < h; y++) {
+    const ro = y * rowLen;
+    for (let x = 0; x < rowLen; x++) {
+      const i = ro + x;
+      const p = y === 0 ? (x < comps ? init : samples[i - comps]) : (x < comps ? samples[i - rowLen] : samples[i - comps]);
+      let d = (samples[i] - p) & 0xffff;
+      if (d >= 32768) d -= 65536;
+      let s;
+      if (d === -32768) s = 16;
+      else { let a = d < 0 ? -d : d; s = 0; while (a) { s++; a >>= 1; } }
+      ssss[i] = s; diffs[i] = d; freq[s]++;
+    }
+  }
+  const { counts, symbols, codes, lens } = buildHuffmanTable(freq);
+  // Header
+  const head = [];
+  const put16 = (v) => head.push((v >> 8) & 255, v & 255);
+  put16(0xffd8);
+  put16(0xffc3); put16(8 + 3 * comps); head.push(bits); put16(h); put16(w); head.push(comps);
+  for (let c = 0; c < comps; c++) head.push(c + 1, 0x11, 0);
+  put16(0xffc4); put16(2 + 1 + 16 + symbols.length); head.push(0); for (let i = 0; i < 16; i++) head.push(counts[i]); head.push(...symbols);
+  put16(0xffda); put16(6 + 2 * comps); head.push(comps); for (let c = 0; c < comps; c++) head.push(c + 1, 0); head.push(1, 0, 0);
+  // Entropy-coded data (worst case ~ 32 bits per sample + stuffing)
+  let out = new Uint8Array(head.length + Math.ceil(n * 2.2) + 1024);
+  out.set(head);
+  let pos = head.length;
+  let acc = 0, cnt = 0;
+  const ensure = () => { if (pos + 16 > out.length) { const o = new Uint8Array(out.length * 2); o.set(out); out = o; } };
+  const emit = (v, l) => {
+    // l <= 16; keep acc below 32 bits
+    acc = (acc << l) | (v & ((1 << l) - 1));
+    cnt += l;
+    while (cnt >= 8) {
+      cnt -= 8;
+      const b = (acc >>> cnt) & 255;
+      out[pos++] = b;
+      if (b === 0xff) out[pos++] = 0;
+    }
+    acc &= (1 << cnt) - 1;
+  };
+  for (let i = 0; i < n; i++) {
+    if ((i & 4095) === 0) ensure();
+    if (pos + 16 > out.length) ensure();
+    const s = ssss[i];
+    emit(codes[s], lens[s]);
+    if (s && s < 16) { const d = diffs[i]; emit(d < 0 ? d + (1 << s) - 1 : d, s); }
+  }
+  if (cnt) emit(0x7f, 8 - cnt);
+  ensure();
+  out[pos++] = 0xff; out[pos++] = 0xd9;
+  return out.subarray(0, pos);
+}
+
+// JPEG Annex K.2: code lengths from frequencies, limited to 16 bits; returns canonical codes.
+function buildHuffmanTable(freqIn) {
+  const freq = new Float64Array(257);
+  for (let i = 0; i < 17; i++) freq[i] = freqIn[i];
+  freq[256] = 1; // reserved so no code is all ones
+  const codesize = new Int32Array(257), others = new Int32Array(257).fill(-1);
+  for (;;) {
+    let c1 = -1, c2 = -1, v = Infinity;
+    for (let i = 0; i <= 256; i++) if (freq[i] && freq[i] <= v) { v = freq[i]; c1 = i; }
+    v = Infinity;
+    for (let i = 0; i <= 256; i++) if (freq[i] && freq[i] <= v && i !== c1) { v = freq[i]; c2 = i; }
+    if (c2 < 0) break;
+    freq[c1] += freq[c2]; freq[c2] = 0;
+    codesize[c1]++; while (others[c1] >= 0) { c1 = others[c1]; codesize[c1]++; }
+    others[c1] = c2;
+    codesize[c2]++; while (others[c2] >= 0) { c2 = others[c2]; codesize[c2]++; }
+  }
+  const bitsArr = new Int32Array(33);
+  for (let i = 0; i <= 256; i++) if (codesize[i]) bitsArr[codesize[i]]++;
+  for (let i = 32; i > 16; i--) {
+    while (bitsArr[i] > 0) {
+      let j = i - 2; while (bitsArr[j] === 0) j--;
+      bitsArr[i] -= 2; bitsArr[i - 1]++; bitsArr[j + 1] += 2; bitsArr[j]--;
+    }
+  }
+  let i = 16; while (bitsArr[i] === 0) i--;
+  bitsArr[i]--; // remove reserved symbol
+  const counts = new Uint8Array(16);
+  for (let k = 1; k <= 16; k++) counts[k - 1] = bitsArr[k];
+  // Symbols sorted by code size (then value), excluding the reserved 256.
+  const symbols = [];
+  for (let len = 1; len <= 32; len++) for (let s = 0; s < 17; s++) if (codesize[s] === len) symbols.push(s);
+  // Assign canonical codes following `counts` order.
+  const codes = new Uint16Array(17), lens = new Uint8Array(17);
+  let code = 0, k = 0;
+  for (let len = 1; len <= 16; len++) {
+    for (let c = 0; c < counts[len - 1]; c++) { const s = symbols[k++]; codes[s] = code++; lens[s] = len; }
+    code <<= 1;
+  }
+  return { counts, symbols: symbols.slice(0, k), codes, lens };
+}
