@@ -64,7 +64,7 @@
   function setFiles(list) {
     files = Array.from(list).filter((f) => f.size > 0).sort(naturalSort);
     const other = files.filter((f) => !/\.dng$/i.test(f.name));
-    if (other.length) showError(`DNG以外のファイル(${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''})が含まれています。合成にはDNGのみ使えます`); else hideError();
+    if (other.length) showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです`); else hideError();
     files = files.filter((f) => /\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name));
     renderFiles();
     if (files.length) {
@@ -164,7 +164,7 @@
       $('fileMeta').textContent = `${files.length}枚・${[i.make, i.model].filter(Boolean).join(' ')}・${i.width}×${i.height}（${mp}MP）・${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
       if (i.width * i.height > 30e6) {
         $('sizeHalf').checked = true;
-        $('sizeHint').textContent = `${mp}MPの大きなRAWなので1/2を選びました。メモリに余裕のある端末ならフル解像度も試せます。`;
+        $('sizeHint').textContent = `${mp}MPと大きなRAWなので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
       }
     } else if (m.type === 'done') {
       $('barFill').style.width = '100%';
@@ -252,7 +252,7 @@
     const c = $('view');
     c.width = src.w; c.height = src.h;
     c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.w, src.h), 0, 0);
-    $('viewTag').textContent = view === 'image' ? '合成結果' : view === 'first' ? '合成前（1枚目のみ）' : '深度マップ（どのフレームを使ったか）';
+    $('viewTag').textContent = view === 'image' ? '合成結果' : view === 'first' ? '合成前（1枚目のみ）' : '深度マップ（色で使った写真を表示）';
     for (const [id, v] of [['tabImage', 'image'], ['tabFirst', 'first'], ['tabDepth', 'depth']]) $(id).setAttribute('aria-pressed', String(view === v));
     $('legend').hidden = view !== 'depth';
   }

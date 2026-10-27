@@ -143,7 +143,7 @@ footer a { color: inherit; }
 <div class="wrap">
   <header>
     <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
-    <p class="lede">ピント位置をずらして撮ったRAW(DNG)を、手前から奥までピントの合った1枚にまとめます。処理はすべてこの端末の中で行われ、画像がどこかへ送信されることはありません。</p>
+    <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
     <div class="formats" aria-label="対応形式">
       <span class="chip">入力 DNG（ベイヤー / LinearRaw）</span>
       <span class="chip">出力 DNG</span><span class="chip">16bit TIFF</span><span class="chip">JPEG</span>
@@ -154,10 +154,10 @@ footer a { color: inherit; }
     <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
     <div class="drop" id="drop">
       <strong>DNGファイルをまとめて選択</strong>
-      <span>ピント位置の順に並んだ2枚以上のファイル。ファイル名順に処理します</span>
+      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。</span>
       <input type="file" id="file" multiple aria-label="DNGファイルを選択">
     </div>
-    <p class="hint">選択画面が開かない場合は、このページをSafariやChromeなどのブラウザで開いてお試しください。</p>
+    <p class="hint">選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
     <div class="filebar" id="filebar" hidden>
       <div class="meta" id="fileMeta"></div>
       <div><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
@@ -182,22 +182,22 @@ footer a { color: inherit; }
           <label><input type="radio" name="size" id="sizeFull" value="full" checked>フル解像度</label>
           <label><input type="radio" name="size" id="sizeHalf" value="half">1/2（高速）</label>
         </div>
-        <small id="sizeHint">1/2は縦横半分で処理します。メモリが少ない端末や4800万画素級のRAWで選んでください。</small>
+        <small id="sizeHint">縦横を半分にして処理します。メモリの少ない端末や、4800万画素クラスのRAWを使うときにおすすめです。</small>
       </div>
       <div class="field">
         <span class="lbl">位置合わせ</span>
-        <label class="check"><input type="checkbox" id="align" checked>ずれと画角変化（フォーカスブリージング）を補正</label>
-        <label class="check"><input type="checkbox" id="rotate" checked>回転も補正する（手持ち撮影向け）</label>
+        <label class="check"><input type="checkbox" id="align" checked>位置のずれと画角の変化（フォーカスブリージング）を補正</label>
+        <label class="check"><input type="checkbox" id="rotate" checked>傾きも補正する（手持ち撮影向け）</label>
       </div>
       <div class="field">
         <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
         <input type="range" id="detail" min="1" max="10" step="1" value="3">
-        <small>小さいほど細部を拾い、大きいほどノイズや平坦部に強くなります。</small>
+        <small>小さくすると細かい部分まで見分け、大きくするとノイズや平坦な部分で誤判定しにくくなります。</small>
       </div>
       <div class="field">
         <label for="smooth">境界のなめらかさ <output id="smoothOut">2</output></label>
         <input type="range" id="smooth" min="0" max="10" step="1" value="2">
-        <small>フレーム同士のつなぎ目をぼかす幅です。継ぎ目が目立つときは上げてください。</small>
+        <small>写真どうしのつなぎ目をぼかす幅です。継ぎ目が目立つときは大きくしてください。</small>
       </div>
     </div>
     <div class="runrow">
@@ -225,7 +225,7 @@ footer a { color: inherit; }
             <button type="button" id="tabFirst" aria-pressed="false">合成前（1枚目）</button>
             <button type="button" id="tabDepth" aria-pressed="false">深度マップ</button>
           </div>
-          <span class="hint">画像をタップすると等倍で確認できます</span>
+          <span class="hint">画像をタップすると、その部分を等倍で表示します</span>
         </div>
         <div class="viewer" id="viewer"><canvas id="view" aria-label="合成結果のプレビュー"></canvas><span class="tag" id="viewTag">合成結果</span></div>
         <div class="legend" id="legend" hidden><span>1枚目（手前）</span><i></i><span id="legendEnd">最後</span></div>
@@ -236,7 +236,7 @@ footer a { color: inherit; }
         <div class="field">
           <label for="exposure">明るさ（JPEG / TIFF / プレビュー） <output id="expOut">±0.0 EV</output></label>
           <input type="range" id="exposure" min="-3" max="3" step="0.1" value="0">
-          <small>DNGには反映されません。DNGはLightroomなどで自由に調整できます。</small>
+          <small>DNGには反映されません。DNGの明るさは現像ソフトで自由に調整できます。</small>
         </div>
         <div class="stats">
           <div class="stat"><b id="stSize">-</b><span>出力サイズ</span></div>
@@ -246,9 +246,9 @@ footer a { color: inherit; }
         <div class="rail" id="rail" aria-label="フレームごとの採用率"></div>
         <div class="notice" id="warn" hidden></div>
         <div class="exports">
-          <button type="button" data-fmt="dng"><b>DNGで保存</b><span>16bit リニアRAW・色温度を後から調整可</span></button>
-          <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB・レタッチ用</span></button>
-          <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有・SNS用</span></button>
+          <button type="button" data-fmt="dng"><b>DNGで保存</b><span>RAWのまま保存。現像ソフトで色や明るさを調整できます</span></button>
+          <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB。画像編集ソフトでの仕上げ向け</span></button>
+          <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有やSNS向け</span></button>
         </div>
         <div class="saved" id="saved" aria-live="polite"></div>
       </div>
@@ -256,9 +256,9 @@ footer a { color: inherit; }
   </section>
 
   <footer>
-    <p>このページは外部と通信しません。読み込んだ画像は端末内だけで処理されます。</p>
-    <p>This product includes DNG technology under license by Adobe.<br>DNG、Lightroom は Adobe の、iPhone は Apple Inc. の、その他の製品名は各社の商標または登録商標です。本ツールはそれらの企業とは関係ありません。</p>
-    <p>MIT License・無保証で提供されます。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコード</a></p>
+    <p>このページは外部と通信しません。読み込んだ画像は、この端末の中だけで処理されます。</p>
+    <p>This product includes DNG technology under license by Adobe.<br>DNG と Lightroom は Adobe Inc.、iPhone は Apple Inc. の商標です。その他の製品名も、それぞれの会社の商標または登録商標です。このツールは、これらの会社が提供・推奨するものではありません。</p>
+    <p>MITライセンスのオープンソースです。動作は保証していません。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコードを見る</a></p>
   </footer>
 </div>
 
