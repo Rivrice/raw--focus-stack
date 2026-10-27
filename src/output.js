@@ -306,31 +306,48 @@ function makeDemoStack(n = 6, W = 960, H = 640, seed = 7, blurK = 1.8) {
   // Keep every shape clear of the frame edge, where focus breathing leaves no data in the outer frames.
   const keep = (v, r, len) => Math.min(len - r - 0.06 * S, Math.max(r + 0.06 * S, v));
   // Three shapes (far, middle, near); which kinds appear changes with the seed.
+  // Each kind spans [-0.9r, 0.9r] vertically (so bottoms line up at cy + 0.9r); hw is its half-width in r.
   const kinds = [
-    // Each kind fills roughly [-0.9r, 0.9r] vertically so shapes on one baseline line up.
-    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.9, r * 0.9, S * 0.01), cx, cy, r, 0.6),
-    (cx, cy, r) => shape(sdCircle(cx, cy, r * 0.92), cx, cy, r, 0.8),
-    (cx, cy, r) => shape(sdBox(cx, cy, r * 0.65, r * 0.65, S * 0.008, Math.PI / 4), cx, cy, r, 0.7),
-    (cx, cy, r) => shape(sdTri(cx, cy + r * 0.3, r * 1.2), cx, cy, r, -0.5),
-    (cx, cy, r) => shape(sdBars(cx, cy, r * 0.9, r * 0.14, 4, r * 0.16), cx, cy, r, 0),
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.9, r * 0.9, S * 0.01), cx, cy, r, 0.6) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdCircle(cx, cy, r * 0.92), cx, cy, r, 0.8) },
+    { hw: 0.92, make: (cx, cy, r) => shape(sdBox(cx, cy, r * 0.65, r * 0.65, S * 0.008, Math.PI / 4), cx, cy, r, 0.7) },
+    { hw: 1.04, make: (cx, cy, r) => shape(sdTri(cx, cy + r * 0.3, r * 1.2), cx, cy, r, -0.5) },
+    { hw: 0.90, make: (cx, cy, r) => shape(sdBars(cx, cy + r * 0.1, r * 0.9, r * 0.14, 4, r * 0.16), cx, cy, r, 0) },
   ];
   const bars = kinds[4];
   for (let i = kinds.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [kinds[i], kinds[k]] = [kinds[k], kinds[i]]; }
   if (kinds[2] === bars) [kinds[2], kinds[3]] = [kinds[3], kinds[2]]; // bars read better behind a solid shape
-  // Composed layouts (far, middle, near as [x, y, half-size]): the near shape is the largest, so size reads as depth.
-  // Each layout either overlaps the shapes or stands them on one baseline. Mirrored at random.
-  const base = 0.84;
-  const layouts = [
-    [[0.37, 0.33, 0.20], [0.50, 0.50, 0.26], [0.65, 0.64, 0.32]],                       // diagonal cascade, overlapping
-    [[0.50, 0.30, 0.20], [0.34, 0.55, 0.26], [0.64, 0.62, 0.31]],                       // cluster, near shape in front of both
-    [[0.20, base - 0.16, 0.16], [0.46, base - 0.22, 0.22], [0.77, base - 0.29, 0.29]],  // one baseline, growing toward the viewer
-    [[0.68, 0.30, 0.19], [0.55, 0.47, 0.25], [0.38, 0.63, 0.31]],                       // receding diagonal into the top corner
+  // Composed layouts. Every layout follows exactly one rule: the shapes overlap, or they stand side by side on
+  // one baseline. Either way the near shape is the largest, so size reads as depth. Mirrored at random.
+  const sizes = [0.20, 0.26, 0.32];
+  const overlapping = [ // centres (x in W, y in S) for far, middle, near
+    [[0.37, 0.33], [0.50, 0.50], [0.65, 0.64]], // diagonal cascade toward the viewer
+    [[0.50, 0.30], [0.34, 0.55], [0.64, 0.62]], // cluster: near shape in front of both
+    [[0.68, 0.30], [0.55, 0.47], [0.38, 0.63]], // receding diagonal into the top corner
   ];
-  const layout = layouts[Math.floor(rnd() * layouts.length)], flip = rnd() < 0.5;
-  const shapes = layout.map(([sx, sy, sr], i) => {
-    const r = S * sr, cx = keep(W * (flip ? 1 - sx : sx), r, W), cy = keep(H * 0.5 + (sy - 0.5) * S, r, H);
-    return kinds[i](cx, cy, r);
-  });
+  const pick = Math.floor(rnd() * (overlapping.length + 1)), flip = rnd() < 0.5;
+  let shapes;
+  if (pick < overlapping.length) {
+    shapes = overlapping[pick].map(([sx, sy], i) => {
+      const r = S * sizes[i], cx = keep(W * (flip ? 1 - sx : sx), r, W), cy = keep(H * 0.5 + (sy - 0.5) * S, r, H);
+      return kinds[i].make(cx, cy, r);
+    });
+  } else {
+    // Side by side on one baseline, equal gaps, the whole row centred; no shape touches another.
+    let rs = [0.18, 0.24, 0.31].map((f) => f * S);
+    const gap = 0.07 * W, avail = W - 2 * 0.08 * W - 2 * gap;
+    const need = rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0);
+    if (need > avail) rs = rs.map((r) => r * avail / need);
+    const order = flip ? [2, 1, 0] : [0, 1, 2], baseY = H * 0.5 + 0.9 * rs[2]; // the largest shape is centred vertically
+    let x = (W - (rs.reduce((t, r, i) => t + 2 * kinds[i].hw * r, 0) + 2 * gap)) / 2;
+    shapes = [];
+    for (const i of order) {
+      const w = kinds[i].hw * rs[i];
+      shapes[i] = kinds[i].make(x + w, baseY - 0.9 * rs[i], rs[i]);
+      x += 2 * w + gap;
+    }
+  }
+
 
 
   // Grain: fine speckle plus a soft "paper" mottling; this is also what the focus detector locks onto.
