@@ -332,6 +332,32 @@
     }
   }));
 
+  // Phrase-aware line breaks for browsers without word-break: auto-phrase (Safari, Firefox):
+  // allow a break only where a run of kana/punctuation ends and a new word starts.
+  function phraseBreaks(root) {
+    if (typeof Intl === 'undefined' || !Intl.Segmenter || CSS.supports('word-break', 'auto-phrase')) return;
+    const seg = new Intl.Segmenter('ja', { granularity: 'word' });
+    const tail = /[\u3041-\u309f、。，．）」』！？・ー]$/, head = /^[^\u3041-\u309f、。，．）」』！？・ー\s]/;
+    root.querySelectorAll('.lede, .hint, .drop span, .field small, .check, details li, footer p, .exports button span, .notice').forEach((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        const parts = []; let cur = '';
+        for (const { segment } of seg.segment(node.data)) {
+          if (cur && tail.test(cur) && head.test(segment)) { parts.push(cur); cur = ''; }
+          cur += segment;
+        }
+        parts.push(cur);
+        if (parts.length < 2) continue;
+        const frag = document.createDocumentFragment();
+        parts.forEach((t, i) => { if (i) frag.appendChild(document.createElement('wbr')); frag.appendChild(document.createTextNode(t)); });
+        node.replaceWith(frag);
+      }
+      el.classList.add('ph');
+    });
+  }
+  phraseBreaks(document);
+
   renderFiles();
   // Open in a working state: run the small built-in sample once.
   setTimeout(() => startRun(true), 300);

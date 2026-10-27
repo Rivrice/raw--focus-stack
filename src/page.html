@@ -35,14 +35,24 @@ body {
   background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 20px 48px;
+  /* Japanese typesetting: break between phrases, not inside words (Chrome: auto-phrase; others: <wbr> from ui.js). */
+  word-break: auto-phrase; line-break: strict; overflow-wrap: anywhere;
+  font-kerning: normal; letter-spacing: 0.02em;
+  text-spacing-trim: trim-start; text-autospace: normal;
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
 }
+.ph { word-break: keep-all; }
+h1, h2, button, .seg label, .field > label, .field > .lbl, .chip, .badge, .tabs button, .stat span, details summary, .drop strong {
+  font-feature-settings: "palt"; letter-spacing: 0.04em;
+}
+.lede, .hint, .field small, details li, .drop span, footer p, .notice, .exports button span { text-wrap: pretty; }
 .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 header { display: flex; flex-direction: column; gap: 6px; padding-block: 6px 4px; }
-h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.02em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; font-weight: 700; letter-spacing: 0.06em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
 h1 .mark { width: 22px; height: 22px; flex: none; }
-.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.lede { margin: 0; color: var(--muted); max-width: 40em; line-height: 1.75; }
 .formats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.chip { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
+.chip { font-size: 0.75rem; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
 section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .step-head { display: flex; align-items: baseline; gap: 10px; }
 .step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; }
@@ -54,7 +64,7 @@ h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
 }
 .drop:hover, .drop.over { border-color: var(--accent); }
 .drop strong { font-size: 1rem; }
-.drop span { color: var(--muted); font-size: 0.85rem; }
+.drop span { color: var(--muted); font-size: 0.85rem; max-width: 26em; text-wrap: balance; }
 .drop { position: relative; }
 .drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -78,7 +88,8 @@ ol.files .sz { font-family: var(--font-mono); color: var(--muted); font-variant-
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg label:has(input:checked) { background: var(--ink); color: var(--bg); }
 .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-.check { display: flex; gap: 8px; align-items: center; font-size: 0.86rem; color: var(--muted); }
+.field > label.check { display: flex; justify-content: flex-start; gap: 8px; align-items: flex-start; font-weight: 400; font-size: 0.86rem; color: var(--muted); line-height: 1.5; letter-spacing: 0.02em; font-feature-settings: normal; }
+.check input { margin: 2px 0 0; flex: none; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 14px; }
@@ -106,8 +117,8 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 .zoombox { display: flex; flex-direction: column; gap: 6px; }
 .zoombox canvas { width: 100%; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); image-rendering: pixelated; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-left: 2px solid var(--line); }
-.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.98rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 6px 10px; min-width: 0; border-left: 2px solid var(--line); }
+.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem; white-space: nowrap; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .stat span { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; }
 .rail { display: flex; flex-direction: column; gap: 4px; }
 .rail-row { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) 4.2em 5.4em; gap: 8px; align-items: center; font-size: 0.8rem; }
@@ -118,7 +129,7 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 .rail-row .s { color: var(--muted); }
 .rail-head { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; }
 .exports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .exports { grid-template-columns: 1fr; } }
 .exports button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .exports button b { font-size: 0.95rem; }
 .exports button span { font-size: 0.75rem; color: var(--muted); }
@@ -133,14 +144,15 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 details { font-size: 0.88rem; color: var(--muted); }
 details summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 details ul { padding-left: 1.2em; margin: 8px 0 0; }
-footer { color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+footer { color: var(--muted); font-size: 0.75rem; line-height: 1.7; text-align: center; display: flex; flex-direction: column; gap: 8px; padding-inline: 4px; }
+footer p { text-wrap: balance; max-width: 40em; margin-inline: auto; }
 footer p { margin: 0; }
 footer a { color: inherit; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
 
-<div class="wrap">
+<div class="wrap" lang="ja">
   <header>
     <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
     <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
@@ -257,7 +269,7 @@ footer a { color: inherit; }
 
   <footer>
     <p>このページは外部と通信しません。読み込んだ画像は、この端末の中だけで処理されます。</p>
-    <p>This product includes DNG technology under license by Adobe.<br>DNG と Lightroom は Adobe Inc.、iPhone は Apple Inc. の商標です。その他の製品名も、それぞれの会社の商標または登録商標です。このツールは、これらの会社が提供・推奨するものではありません。</p>
+    <p>This product includes DNG technology under license by Adobe.<br>DNG と Lightroom は Adobe Inc.、iPhone は Apple Inc. の商標です。その他の製品名も、それぞれの会社の商標または登録商標です。<br>このツールは、これらの会社が提供・推奨するものではありません。</p>
     <p>MITライセンスのオープンソースです。動作は保証していません。<a href="https://github.com/Rivrice/raw--focus-stack">ソースコードを見る</a></p>
   </footer>
 </div>
