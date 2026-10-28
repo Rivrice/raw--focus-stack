@@ -133,6 +133,14 @@ async function handleMessage(msg, post) {
       const res = state.result; if (!res) throw new Error('先に合成を実行してください');
       const base = (msg.demo ? 'sample-stack-' : 'focus-stack-') + stamp();
       let bytes, name, rgba = null;
+      if (msg.format === 'compare') {
+        // Before (first frame, same crop) and after at the same preview size; the page lays them out and labels them.
+        const fp = renderFirst(res, msg.exposure || 0);
+        if (!fp) throw new Error('比較用の合成前画像がありません');
+        const r8 = renderImage(res.data, res.width, res.height, state.rt, { bits: 8, maxSide: Math.max(fp.w, fp.h), exposure: msg.exposure || 0, orientation: res.meta.orientation });
+        post({ type: 'export', id: msg.id, name: base + '-before-after.jpg', pair: { before: fp, after: { data: r8.data, w: r8.w, h: r8.h } } }, [fp.data.buffer, r8.data.buffer]);
+        return;
+      }
       if (msg.format === 'dng') {
         bytes = writeStackDNG(res.data, res.width, res.height, res.meta);
         name = base + '.dng';
