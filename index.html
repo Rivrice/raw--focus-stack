@@ -163,6 +163,8 @@ footer { color: var(--muted); font-size: 0.75rem; line-height: 1.7; text-align: 
 footer p { text-wrap: balance; max-width: 40em; margin-inline: auto; }
 footer p { margin: 0; }
 footer a { color: inherit; }
+.auto-note { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.auto-note button { padding: 2px 6px; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
@@ -218,14 +220,15 @@ footer a { color: inherit; }
       </div>
       <div class="field">
         <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
-        <input type="range" id="detail" min="1" max="10" step="1" value="3">
+        <input type="range" id="detail" min="1" max="16" step="1" value="3">
         <small>小さくすると細かい部分まで見分け、大きくするとノイズや平坦な部分で誤判定しにくくなります。</small>
       </div>
       <div class="field">
         <label for="smooth">境界のなめらかさ <output id="smoothOut">2</output></label>
-        <input type="range" id="smooth" min="0" max="10" step="1" value="2">
+        <input type="range" id="smooth" min="0" max="16" step="1" value="2">
         <small>写真どうしのつなぎ目をぼかす幅です。継ぎ目が目立つときは大きくしてください。</small>
       </div>
+      <p class="hint auto-note" id="autoNote"><span id="autoText">ピント判定の範囲と境界のなめらかさは、読み込んだ画像の解像度に合わせて自動で設定します。</span><button class="ghost" type="button" id="autoReset" hidden>自動に戻す</button></p>
     </div>
     <div class="runrow">
       <button class="primary" id="run" type="button" disabled>深度合成を開始</button>
@@ -2341,17 +2344,34 @@ return { handleMessage };
   $('clear').addEventListener('click', () => { files = []; renderFiles(); });
 
   for (const [id, out] of [['detail', 'detailOut'], ['smooth', 'smoothOut']]) {
-    $(id).addEventListener('input', () => { $(out).textContent = $(id).value; });
+    $(id).addEventListener('input', () => { $(out).textContent = $(id).value; autoParams.manual = true; $('autoReset').hidden = false; $('autoText').textContent = '手動で設定しています。'; });
   }
+
+  // Detection radius and seam blending scale with resolution. Values are in focus-grid cells
+  // (engine.js: 1 px, or 2 px above 6 MP), tuned so a 720 px wide sample gets 3 / 2.
+  const autoParams = { w: 720, h: 480, manual: false };
+  function applyAutoParams(note) {
+    if (autoParams.manual) return;
+    const half = $('sizeHalf').checked && autoParams.w * autoParams.h > 1e6;
+    const w = half ? autoParams.w >> 1 : autoParams.w, h = half ? autoParams.h >> 1 : autoParams.h;
+    const g = w * h > 6e6 ? 2 : 1, L = Math.max(w, h);
+    const detail = Math.min(16, Math.max(1, Math.round(L / 250 / g))), smooth = Math.min(16, Math.max(1, Math.round(L / 360 / g)));
+    $('detail').value = detail; $('detailOut').textContent = detail;
+    $('smooth').value = smooth; $('smoothOut').textContent = smooth;
+    if (note) $('autoText').textContent = `${w}×${h}px の処理サイズに合わせて自動で設定しました（範囲 約${detail * g}px・なめらかさ 約${smooth * g}px）。`;
+  }
+  $('autoReset').addEventListener('click', () => { autoParams.manual = false; $('autoReset').hidden = true; applyAutoParams(true); });
+  for (const id of ['sizeFull', 'sizeHalf']) $(id).addEventListener('change', () => applyAutoParams(true));
   $('align').addEventListener('change', () => { $('rotate').disabled = !$('align').checked; });
 
-  function options() {
+  function options(demo) {
+    const auto = demo && !autoParams.manual; // the built-in sample is 720×480
     return {
       half: $('sizeHalf').checked,
       align: $('align').checked,
       noRotation: !$('rotate').checked,
-      detail: +$('detail').value,
-      smooth: +$('smooth').value,
+      detail: auto ? 3 : +$('detail').value,
+      smooth: auto ? 2 : +$('smooth').value,
     };
   }
 
@@ -2373,7 +2393,7 @@ return { handleMessage };
     timer = setInterval(() => { $('pTime').textContent = Math.round((Date.now() - t0) / 1000) + 's'; }, 500);
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
     demoCount += demo ? 1 : 0;
-    lastRunMsg = { type: 'run', demo, seed: demo ? (demoCount === 1 ? 11 : Math.floor(Math.random() * 1e9)) : 0, files: demo ? null : files, opts: options(), exposure: +$('exposure').value, previewSize: previewSize() };
+    lastRunMsg = { type: 'run', demo, seed: demo ? (demoCount === 1 ? 11 : Math.floor(Math.random() * 1e9)) : 0, files: demo ? null : files, opts: options(demo), exposure: +$('exposure').value, previewSize: previewSize() };
     worker.postMessage(lastRunMsg);
   }
 
@@ -2407,6 +2427,8 @@ return { handleMessage };
         $('sizeHalf').checked = true;
         $('sizeHint').textContent = `${mp}MPと大きなRAWなので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
       }
+      autoParams.w = i.width; autoParams.h = i.height; autoParams.manual = false; $('autoReset').hidden = true;
+      applyAutoParams(true);
     } else if (m.type === 'done') {
       $('barFill').style.width = '100%';
       $('pText').textContent = `完了（${m.seconds.toFixed(1)}秒）`;

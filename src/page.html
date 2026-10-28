@@ -163,6 +163,8 @@ footer { color: var(--muted); font-size: 0.75rem; line-height: 1.7; text-align: 
 footer p { text-wrap: balance; max-width: 40em; margin-inline: auto; }
 footer p { margin: 0; }
 footer a { color: inherit; }
+.auto-note { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.auto-note button { padding: 2px 6px; }
 .saved { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
@@ -218,14 +220,15 @@ footer a { color: inherit; }
       </div>
       <div class="field">
         <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
-        <input type="range" id="detail" min="1" max="10" step="1" value="3">
+        <input type="range" id="detail" min="1" max="16" step="1" value="3">
         <small>小さくすると細かい部分まで見分け、大きくするとノイズや平坦な部分で誤判定しにくくなります。</small>
       </div>
       <div class="field">
         <label for="smooth">境界のなめらかさ <output id="smoothOut">2</output></label>
-        <input type="range" id="smooth" min="0" max="10" step="1" value="2">
+        <input type="range" id="smooth" min="0" max="16" step="1" value="2">
         <small>写真どうしのつなぎ目をぼかす幅です。継ぎ目が目立つときは大きくしてください。</small>
       </div>
+      <p class="hint auto-note" id="autoNote"><span id="autoText">ピント判定の範囲と境界のなめらかさは、読み込んだ画像の解像度に合わせて自動で設定します。</span><button class="ghost" type="button" id="autoReset" hidden>自動に戻す</button></p>
     </div>
     <div class="runrow">
       <button class="primary" id="run" type="button" disabled>深度合成を開始</button>
