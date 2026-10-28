@@ -100,17 +100,34 @@
   $('clear').addEventListener('click', () => { files = []; renderFiles(); });
 
   for (const [id, out] of [['detail', 'detailOut'], ['smooth', 'smoothOut']]) {
-    $(id).addEventListener('input', () => { $(out).textContent = $(id).value; });
+    $(id).addEventListener('input', () => { $(out).textContent = $(id).value; autoParams.manual = true; $('autoReset').hidden = false; $('autoText').textContent = '手動で設定しています。'; });
   }
+
+  // Detection radius and seam blending scale with resolution. Values are in focus-grid cells
+  // (engine.js: 1 px, or 2 px above 6 MP), tuned so a 720 px wide sample gets 3 / 2.
+  const autoParams = { w: 720, h: 480, manual: false };
+  function applyAutoParams(note) {
+    if (autoParams.manual) return;
+    const half = $('sizeHalf').checked && autoParams.w * autoParams.h > 1e6;
+    const w = half ? autoParams.w >> 1 : autoParams.w, h = half ? autoParams.h >> 1 : autoParams.h;
+    const g = w * h > 6e6 ? 2 : 1, L = Math.max(w, h);
+    const detail = Math.min(16, Math.max(1, Math.round(L / 250 / g))), smooth = Math.min(16, Math.max(1, Math.round(L / 360 / g)));
+    $('detail').value = detail; $('detailOut').textContent = detail;
+    $('smooth').value = smooth; $('smoothOut').textContent = smooth;
+    if (note) $('autoText').textContent = `${w}×${h}px の処理サイズに合わせて自動で設定しました（範囲 約${detail * g}px・なめらかさ 約${smooth * g}px）。`;
+  }
+  $('autoReset').addEventListener('click', () => { autoParams.manual = false; $('autoReset').hidden = true; applyAutoParams(true); });
+  for (const id of ['sizeFull', 'sizeHalf']) $(id).addEventListener('change', () => applyAutoParams(true));
   $('align').addEventListener('change', () => { $('rotate').disabled = !$('align').checked; });
 
-  function options() {
+  function options(demo) {
+    const auto = demo && !autoParams.manual; // the built-in sample is 720×480
     return {
       half: $('sizeHalf').checked,
       align: $('align').checked,
       noRotation: !$('rotate').checked,
-      detail: +$('detail').value,
-      smooth: +$('smooth').value,
+      detail: auto ? 3 : +$('detail').value,
+      smooth: auto ? 2 : +$('smooth').value,
     };
   }
 
@@ -132,7 +149,7 @@
     timer = setInterval(() => { $('pTime').textContent = Math.round((Date.now() - t0) / 1000) + 's'; }, 500);
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
     demoCount += demo ? 1 : 0;
-    lastRunMsg = { type: 'run', demo, seed: demo ? (demoCount === 1 ? 11 : Math.floor(Math.random() * 1e9)) : 0, files: demo ? null : files, opts: options(), exposure: +$('exposure').value, previewSize: previewSize() };
+    lastRunMsg = { type: 'run', demo, seed: demo ? (demoCount === 1 ? 11 : Math.floor(Math.random() * 1e9)) : 0, files: demo ? null : files, opts: options(demo), exposure: +$('exposure').value, previewSize: previewSize() };
     worker.postMessage(lastRunMsg);
   }
 
@@ -166,6 +183,8 @@
         $('sizeHalf').checked = true;
         $('sizeHint').textContent = `${mp}MPと大きなRAWなので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
       }
+      autoParams.w = i.width; autoParams.h = i.height; autoParams.manual = false; $('autoReset').hidden = true;
+      applyAutoParams(true);
     } else if (m.type === 'done') {
       $('barFill').style.width = '100%';
       $('pText').textContent = `完了（${m.seconds.toFixed(1)}秒）`;
