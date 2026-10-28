@@ -38,7 +38,7 @@ body {
   /* Japanese typesetting: break between phrases, not inside words (Chrome: auto-phrase; others: <wbr> from ui.js). */
   word-break: auto-phrase; line-break: strict; overflow-wrap: anywhere;
   font-kerning: normal; letter-spacing: 0.02em;
-  text-spacing-trim: trim-start; text-autospace: normal;
+  text-spacing-trim: trim-start;
   -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
 }
 .ph { word-break: keep-all; }
@@ -55,7 +55,7 @@ h1 .mark { width: 22px; height: 22px; flex: none; }
 .chip { font-size: 0.75rem; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); }
 section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .step-head { display: flex; align-items: baseline; gap: 10px; }
-.step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; }
+.step-no { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); font-weight: 500; letter-spacing: 0.06em; word-spacing: -0.5em; white-space: nowrap; }
 h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
 .hint { margin: 0; color: var(--muted); font-size: 0.86rem; }
 .drop {
@@ -279,7 +279,7 @@ footer a { color: inherit; }
           <button type="button" data-fmt="dng"><b>DNGで保存</b><span>RAWのまま保存。現像ソフトで色や明るさを調整できます</span></button>
           <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB。画像編集ソフトでの仕上げ向け</span></button>
           <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有やSNS向け</span></button>
-          <button type="button" data-fmt="compare"><b>比較JPEGで保存</b><span>合成前と合成後を並べた1枚。仕上がりの紹介向け</span></button>
+          <button type="button" data-fmt="compare"><b>比較JPEGで保存</b><span>合成前後を並べた1枚。作例の紹介向け</span></button>
         </div>
         <div class="saved" id="saved" aria-live="polite"></div>
       </div>
