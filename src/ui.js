@@ -226,6 +226,7 @@
     const now = new Date();
     $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
     $('tabCompare').hidden = !m.first;
+    document.querySelector('[data-fmt="compare"]').hidden = !m.first;
     $('zoombox').hidden = true;
     drawView();
     $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);
@@ -355,6 +356,28 @@
     });
   }
 
+  // One JPEG with Before and After side by side (portrait shots) or stacked (landscape), each labelled.
+  async function compareJpegBlob({ before, after }) {
+    const w = before.w, h = before.h, vertical = w >= h, gap = Math.max(4, Math.round(Math.max(w, h) * 0.008));
+    const c = document.createElement('canvas');
+    c.width = vertical ? w : w * 2 + gap; c.height = vertical ? h * 2 + gap : h;
+    const g = c.getContext('2d');
+    g.fillStyle = '#111'; g.fillRect(0, 0, c.width, c.height);
+    const fs = Math.max(14, Math.round(Math.min(w, h) * 0.04)), pad = Math.round(fs * 0.6);
+    g.font = `600 ${fs}px "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif`;
+    [[before, 'Before'], [after, 'After']].forEach(([img, text], k) => {
+      const t = document.createElement('canvas'); t.width = img.w; t.height = img.h;
+      t.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(img.data), img.w, img.h), 0, 0);
+      const x = vertical ? 0 : k * (w + gap), y = vertical ? k * (h + gap) : 0;
+      g.drawImage(t, x, y, w, h);
+      const tw = g.measureText(text).width, bh = fs + pad, bx = x + pad, by = y + pad;
+      g.fillStyle = 'rgba(0,0,0,0.55)';
+      g.beginPath(); if (g.roundRect) g.roundRect(bx, by, tw + pad * 2, bh, bh / 2); else g.rect(bx, by, tw + pad * 2, bh); g.fill();
+      g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(text, bx + pad, by + bh / 2 + 1);
+    });
+    return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.92));
+  }
+
   async function rgbaToJpegBlob(r) {
     const c = document.createElement('canvas'); c.width = r.w; c.height = r.h;
     c.getContext('2d').putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
@@ -364,7 +387,7 @@
   document.querySelectorAll('.exports button').forEach((btn) => btn.addEventListener('click', async () => {
     if (!lastResult || busy) return;
     const fmt = btn.dataset.fmt;
-    const label = { dng: 'DNG', tiff: 'TIFF', jpeg: 'JPEG' }[fmt];
+    const label = { dng: 'DNG', tiff: 'TIFF', jpeg: 'JPEG', compare: '比較JPEG' }[fmt];
     const buttons = document.querySelectorAll('.exports button');
     buttons.forEach((b) => (b.disabled = true));
     $('saved').textContent = `${label}を書き出しています…`;
@@ -373,7 +396,8 @@
       const useCap = !!downloadsCap;
       const m = await requestExport(fmt, useCap);
       let blob, name = m.name;
-      if (m.rgba) blob = await rgbaToJpegBlob(m.rgba);
+      if (m.pair) blob = await compareJpegBlob(m.pair);
+      else if (m.rgba) blob = await rgbaToJpegBlob(m.rgba);
       else if (m.zip) { blob = m.zip; name = m.name.replace(/\.[^.]+$/, '') + '.zip'; }
       else blob = new Blob([m.bytes], { type: fmt === 'jpeg' ? 'image/jpeg' : fmt === 'dng' ? 'image/x-adobe-dng' : 'image/tiff' });
       const size = fmtMB(blob.size);

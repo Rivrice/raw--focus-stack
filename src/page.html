@@ -143,7 +143,7 @@ button.ghost { border-color: transparent; color: var(--muted); padding: 6px 8px;
 .rail-row .v, .rail-row .s { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 .rail-row .s { color: var(--muted); }
 .rail-head { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; }
-.exports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.exports { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 480px) { .exports { grid-template-columns: 1fr; } }
 .exports button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .exports button b { font-size: 0.95rem; }
@@ -279,6 +279,7 @@ footer a { color: inherit; }
           <button type="button" data-fmt="dng"><b>DNGで保存</b><span>RAWのまま保存。現像ソフトで色や明るさを調整できます</span></button>
           <button type="button" data-fmt="tiff"><b>TIFFで保存</b><span>16bit sRGB。画像編集ソフトでの仕上げ向け</span></button>
           <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有やSNS向け</span></button>
+          <button type="button" data-fmt="compare"><b>比較JPEGで保存</b><span>合成前と合成後を並べた1枚。仕上がりの紹介向け</span></button>
         </div>
         <div class="saved" id="saved" aria-live="polite"></div>
       </div>
