@@ -117,6 +117,7 @@ async function handleMessage(msg, post) {
         type: 'done', demo: !!msg.demo, first: fp,
         preview: { data: pv.data, w: pv.w, h: pv.h }, depth: { data: dp.data, w: dp.w, h: dp.h },
         width: res.width, height: res.height, frames: res.frames, warnings: res.warnings, seconds: res.seconds,
+        stats: { fine: res.stats.fine || 0 },
         camera: res.meta.uniqueModel, orientation: res.meta.orientation,
       }, [pv.data.buffer, dp.data.buffer].concat(fp ? [fp.data.buffer] : []));
     } else if (msg.type === 'preview') {

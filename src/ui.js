@@ -104,17 +104,18 @@
   }
 
   // Detection radius and seam blending scale with resolution. Values are in focus-grid cells
-  // (engine.js: 1 px, or 2 px above 6 MP), tuned so a 720 px wide sample gets 3 / 2.
+  // (engine.js: 1 px, or 2 px above 6 MP); the sample's 720 px gets 3 / 2. Kept moderate because the
+  // engine adds a 1-cell window for fine texture and tightens seams there on its own.
   const autoParams = { w: 720, h: 480, manual: false };
   function applyAutoParams(note) {
     if (autoParams.manual) return;
     const half = $('sizeHalf').checked && autoParams.w * autoParams.h > 1e6;
     const w = half ? autoParams.w >> 1 : autoParams.w, h = half ? autoParams.h >> 1 : autoParams.h;
     const g = w * h > 6e6 ? 2 : 1, L = Math.max(w, h);
-    const detail = Math.min(16, Math.max(1, Math.round(L / 250 / g))), smooth = Math.min(16, Math.max(1, Math.round(L / 360 / g)));
+    const detail = Math.min(16, Math.max(3, Math.round(L / 400 / g))), smooth = Math.min(16, Math.max(2, Math.round(L / 500 / g)));
     $('detail').value = detail; $('detailOut').textContent = detail;
     $('smooth').value = smooth; $('smoothOut').textContent = smooth;
-    if (note) $('autoText').textContent = `${w}×${h}px の処理サイズに合わせて自動で設定しました（範囲 約${detail * g}px・なめらかさ 約${smooth * g}px）。`;
+    if (note) $('autoText').textContent = `${w}×${h}px の処理サイズに合わせて自動で設定しました（範囲 約${detail * g}px・なめらかさ 約${smooth * g}px）。苔や草のような細かい部分は、合成のときに見分けて狭い範囲で判定します。`;
   }
   $('autoReset').addEventListener('click', () => { autoParams.manual = false; $('autoReset').hidden = true; applyAutoParams(true); });
   for (const id of ['sizeFull', 'sizeHalf']) $(id).addEventListener('change', () => applyAutoParams(true));
@@ -233,6 +234,9 @@
     const used = m.frames.filter((f) => f.share > 0).length;
     $('stFrames').textContent = `${used} / ${m.frames.length}`;
     $('stTime').textContent = m.seconds.toFixed(1) + ' 秒';
+    const fine = m.stats && m.stats.fine || 0;
+    $('adaptNote').hidden = fine < 0.01;
+    $('adaptNote').innerHTML = `細かい部分として狭い範囲で判定したのは、<span class="ph">画面の約${Math.max(1, Math.round(fine * 100))}%です。</span>`;
     $('legendEnd').textContent = `${m.frames.length}枚目（奥）`;
     // Contribution rail
     const rail = $('rail');
