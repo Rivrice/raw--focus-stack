@@ -47,7 +47,7 @@ function focusEnergy(img, w, h, g) {
   const inv = 1 / (4 * 65535);
   for (let i = 0, o = 0; i < w * h; i++, o += 3) L[i] = Math.sqrt((img[o] + 2 * img[o + 1] + img[o + 2]) * inv);
   const gw = Math.floor(w / g), gh = Math.floor(h / g);
-  const E = new Float32Array(gw * gh);
+  const E = new Float32Array(gw * gh), M = new Float32Array(gw * gh);
   const row = (y) => Math.min(h - 1, Math.max(0, y)) * w;
   // Binomial-smoothed Laplacian computed row by row with a small ring of smoothed rows.
   const S = [new Float32Array(w), new Float32Array(w), new Float32Array(w)];
@@ -68,11 +68,12 @@ function focusEnergy(img, w, h, g) {
     for (let x = 0; x < gw * g; x++) {
       const xl = Math.max(0, x - 1), xr = Math.min(w - 1, x + 1);
       const lap = up[x] + dn[x] + mid[xl] + mid[xr] - 4 * mid[x];
-      E[ey + ((x / g) | 0)] += lap * lap * gi;
+      const c = ey + ((x / g) | 0);
+      E[c] += lap * lap * gi; M[c] += mid[x] * gi;
     }
     const t = S[0]; S[0] = S[1]; S[1] = S[2]; S[2] = t;
   }
-  return { E, gw, gh };
+  return { E, M, gw, gh };
 }
 
 // Sample a grid map defined in frame coordinates at reference grid positions via affine m (ref px -> frame px).
@@ -144,8 +145,15 @@ function compositeFrame(out, CW, CH, x0, y0, img, W, H, m, wgt, gw, gh, g) {
   }
 }
 
-function updateBest(Ew, best, idx, i) {
-  for (let j = 0; j < Ew.length; j++) if (i === 0 || Ew[j] > best[j]) { best[j] = Ew[j]; idx[j] = i; }
+// Optionally records, for the winning frame, its local brightness (mean) and fine-scale energy (Ef).
+function updateBest(Ew, best, idx, i, mean, meanAt, Ef, EfAt) {
+  for (let j = 0; j < Ew.length; j++) {
+    if (i === 0 || Ew[j] > best[j]) {
+      best[j] = Ew[j]; idx[j] = i;
+      if (meanAt) meanAt[j] = mean[j] * 65535; // Uint16, sqrt-luma 0..1
+      if (EfAt) EfAt[j] = Ef[j];
+    }
+  }
 }
 
 // frames: [{name, load: async () => ArrayBuffer}]
@@ -157,12 +165,16 @@ async function runStack(frames, opts, progress = () => {}) {
   const decodeOpts = { half: !!opts.half };
   const t0 = Date.now();
   let W = 0, H = 0, g = 1, gw = 0, gh = 0, refMeta = null;
-  let best = null, idx = null;
+  let best = null, idx = null, bestF = null, idxF = null, meanF = null, meanC = null, efC = null;
+  const coarseR = Math.max(1, Math.round(opts.detail || 3));
+  // A second, 1-cell detection window runs alongside the user's one (opts.fine: 0 turns it off).
+  const fineR = opts.fine === 0 || coarseR <= 1 ? 0 : 1;
   const affines = [];
   const info = [];
   let prevSmall = null, k = 1;
   let prevAff = [1, 0, 0, 0, 1, 0];
   const warnings = new Set();
+  const stats = {};
 
   for (let i = 0; i < N; i++) {
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を読み込み中` });
@@ -175,6 +187,10 @@ async function runStack(frames, opts, progress = () => {}) {
       g = W * H > 6e6 ? 2 : 1;
       gw = Math.floor(W / g); gh = Math.floor(H / g);
       best = new Float32Array(gw * gh); idx = new Uint8Array(gw * gh);
+      if (fineR) {
+        bestF = new Float32Array(gw * gh); idxF = new Uint8Array(gw * gh);
+        meanF = new Uint16Array(gw * gh); meanC = new Uint16Array(gw * gh); efC = new Float32Array(gw * gh);
+      }
       k = Math.max(1, Math.ceil(Math.max(W, H) / 720));
     } else if (dec.width !== W || dec.height !== H) {
       throw new Error(`${frames[i].name} の画像サイズ(${dec.width}×${dec.height})が1枚目(${W}×${H})と異なります`);
@@ -201,10 +217,14 @@ async function runStack(frames, opts, progress = () => {}) {
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目のピントを解析中` });
     await yieldTick();
     const fe = focusEnergy(dec.data, W, H, g);
-    let Eb = boxBlur(fe.E, fe.gw, fe.gh, Math.max(1, Math.round(opts.detail || 3)), 2);
     const isIdentity = aff[0] === 1 && aff[1] === 0 && aff[2] === 0 && aff[3] === 0 && aff[4] === 1 && aff[5] === 0;
-    const Ew = isIdentity ? Eb : warpGrid(Eb, fe.gw, fe.gh, g, aff, gw, gh);
-    updateBest(Ew, best, idx, i);
+    const toRef = (Eb) => isIdentity ? Eb : warpGrid(Eb, fe.gw, fe.gh, g, aff, gw, gh);
+    const Ec = toRef(boxBlur(fe.E, fe.gw, fe.gh, coarseR, 2));
+    if (fineR) {
+      const Mf = toRef(boxBlur(fe.M, fe.gw, fe.gh, fineR, 2)), Ef = toRef(boxBlur(fe.E, fe.gw, fe.gh, fineR, 2));
+      updateBest(Ec, best, idx, i, Mf, meanC, Ef, efC);
+      updateBest(Ef, bestF, idxF, i, Mf, meanF);
+    } else updateBest(Ec, best, idx, i);
   }
 
   // Depth map clean-up: low-confidence cells take the (energy-weighted) depth of their neighbourhood.
@@ -218,6 +238,25 @@ async function runStack(frames, opts, progress = () => {}) {
   const nb = boxBlur(num, gw, gh, fillR, 2), db = boxBlur(den, gw, gh, fillR, 2);
   for (let j = 0; j < gw * gh; j++) {
     if (best[j] < tau && db[j] > 0) idx[j] = Math.min(N - 1, Math.max(0, Math.round(nb[j] / db[j])));
+  }
+  // In fine textures (moss, grass, twigs) the broad window is ruled by the strongest edge nearby, so the
+  // background between blades gets the blade's frame and comes out blurred. The 1-cell window sees the
+  // background's own detail; it overrides the broad pick where it found real texture, unless the two
+  // frames differ in local brightness there. That difference is the glow of an out-of-focus edge
+  // (a halo), not detail, so those cells and a few around them keep the broad pick.
+  const coarseIdx = median3u8(idx, gw, gh);
+  if (fineR) {
+    const sortedF = Float32Array.from(bestF).sort();
+    const tauF = Math.max(1e-12, sortedF[Math.floor(sortedF.length * 0.1)] * 1.2);
+    const ok = new Uint8Array(gw * gh), halo = new Float32Array(gw * gh);
+    for (let j = 0; j < gw * gh; j++) {
+      if (bestF[j] <= tauF || idxF[j] === idx[j]) continue;
+      if (Math.abs(meanF[j] - meanC[j]) < 0.05 * (meanC[j] + 3277) || bestF[j] > 30 * efC[j]) ok[j] = 1; else halo[j] = 1;
+    }
+    const near = boxBlur(halo, gw, gh, 4, 1);
+    let nf = 0;
+    for (let j = 0; j < gw * gh; j++) if (ok[j] && !(near[j] > 1e-6)) { idx[j] = idxF[j]; nf++; }
+    stats.fine = nf / (gw * gh);
   }
   idx = median3u8(idx, gw, gh);
 
@@ -240,6 +279,19 @@ async function runStack(frames, opts, progress = () => {}) {
   for (let j = 0; j < gw * gh; j++) share[idx[j]]++;
   const out = new Uint16Array(CW * CH * 3);
   const smoothR = Math.max(0, Math.round(opts.smooth ?? 2));
+  // Where the fine window took over densely (grass, moss), seams blend over 1 cell so a sharp blade is
+  // not averaged with the blurred frames around it; elsewhere the full blend radius hides the seams.
+  const tightR = Math.min(smoothR, 1);
+  let calm = null;
+  if (fineR && smoothR > tightR) {
+    const took = new Float32Array(gw * gh);
+    for (let j = 0; j < gw * gh; j++) took[j] = idx[j] !== coarseIdx[j] ? 1 : 0;
+    const dens = boxBlur(took, gw, gh, smoothR * 2, 2);
+    calm = new Float32Array(gw * gh);
+    let sumCalm = 0;
+    for (let j = 0; j < gw * gh; j++) { calm[j] = Math.min(1, Math.max(0, 1.5 - dens[j] / 0.15)); sumCalm += calm[j]; }
+    stats.busy = 1 - sumCalm / (gw * gh);
+  }
   const used = [];
   for (let i = 0; i < N; i++) if (share[i] > 0) used.push(i);
   for (let ui = 0; ui < used.length; ui++) {
@@ -249,6 +301,10 @@ async function runStack(frames, opts, progress = () => {}) {
     const ind = new Float32Array(gw * gh);
     for (let j = 0; j < gw * gh; j++) ind[j] = idx[j] === i ? 1 : 0;
     const wgt = smoothR ? boxBlur(ind, gw, gh, smoothR, 2) : ind;
+    if (calm) {
+      const tight = tightR ? boxBlur(ind, gw, gh, tightR, 2) : ind;
+      for (let j = 0; j < gw * gh; j++) wgt[j] = tight[j] + (wgt[j] - tight[j]) * calm[j];
+    }
     // Dilate a 1-cell mask of where this frame contributes, to skip pixels quickly.
     const dec = await decodeDNG(await frames[i].load(), decodeOpts);
     compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g);
@@ -258,6 +314,6 @@ async function runStack(frames, opts, progress = () => {}) {
   return {
     width: CW, height: CH, data: out, meta: refMeta,
     depth: { data: idx, w: gw, h: gh, g, x0, y0 },
-    frames: info, warnings: [...warnings], seconds: (Date.now() - t0) / 1000,
+    frames: info, warnings: [...warnings], stats, seconds: (Date.now() - t0) / 1000,
   };
 }
