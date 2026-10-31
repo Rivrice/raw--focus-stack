@@ -183,13 +183,13 @@ footer a { color: inherit; }
     <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
     <div class="drop" id="drop">
       <strong>DNGファイルをまとめて選択</strong>
-      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。</span>
+      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
       <input type="file" id="file" multiple aria-label="DNGファイルを選択">
     </div>
-    <p class="hint">選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
+    <p class="hint">一度に選べる枚数が限られているときは、何回かに分けて選んでください。選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
     <div class="filebar" id="filebar" hidden>
       <div class="meta" id="fileMeta"></div>
-      <div><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
+      <div><button class="ghost" id="addMore" type="button">追加で選ぶ</button><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
     </div>
     <ol class="files" id="fileList" hidden></ol>
     <details>

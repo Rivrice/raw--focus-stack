@@ -61,13 +61,24 @@
   const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   const fmtMB = (n) => (n / 1048576).toFixed(n > 1048576 * 100 ? 0 : 1) + ' MB';
 
+  // New picks are added to the list, so a picker that limits how many files can be chosen at once
+  // (some phone galleries stop at 10) can be used several times. The same file is not added twice.
   function setFiles(list) {
-    files = Array.from(list).filter((f) => f.size > 0).sort(naturalSort);
-    const other = files.filter((f) => !/\.dng$/i.test(f.name));
-    if (other.length) showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです`); else hideError();
-    files = files.filter((f) => /\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name));
+    const picked = Array.from(list).filter((f) => f.size > 0);
+    const other = picked.filter((f) => !/\.dng$/i.test(f.name));
+    if (other.length) {
+      const jpeg = other.some((f) => /\.(jpe?g|heic)$/i.test(f.name));
+      showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです` +
+        (jpeg ? '。iPhoneの写真ライブラリから選ぶとJPEGに変換されることがあるため、「ファイル」アプリに保存したDNGを選んでください' : ''));
+    } else hideError();
+    const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+    const have = new Set(files.map(key));
+    const add = picked.filter((f) => (/\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name)) && !have.has(key(f)));
+    if (!add.length) { renderFiles(); return; }
+    const first = files[0];
+    files = files.concat(add).sort(naturalSort);
     renderFiles();
-    if (files.length) {
+    if (files.length && files[0] !== first) {
       const id = ++exportId;
       worker.postMessage({ type: 'info', id, file: files[0] });
     }
@@ -98,6 +109,7 @@
   drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) setFiles(e.dataTransfer.files); });
   $('reverse').addEventListener('click', () => { files.reverse(); renderFiles(); });
   $('clear').addEventListener('click', () => { files = []; renderFiles(); });
+  $('addMore').addEventListener('click', () => $('file').click());
 
   for (const [id, out] of [['detail', 'detailOut'], ['smooth', 'smoothOut']]) {
     $(id).addEventListener('input', () => { $(out).textContent = $(id).value; autoParams.manual = true; $('autoReset').hidden = false; $('autoText').textContent = '手動で設定しています。'; });

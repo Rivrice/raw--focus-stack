@@ -183,13 +183,13 @@ footer a { color: inherit; }
     <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
     <div class="drop" id="drop">
       <strong>DNGファイルをまとめて選択</strong>
-      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。</span>
+      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
       <input type="file" id="file" multiple aria-label="DNGファイルを選択">
     </div>
-    <p class="hint">選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
+    <p class="hint">一度に選べる枚数が限られているときは、何回かに分けて選んでください。選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
     <div class="filebar" id="filebar" hidden>
       <div class="meta" id="fileMeta"></div>
-      <div><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
+      <div><button class="ghost" id="addMore" type="button">追加で選ぶ</button><button class="ghost" id="reverse" type="button">並びを逆にする</button><button class="ghost" id="clear" type="button">クリア</button></div>
     </div>
     <ol class="files" id="fileList" hidden></ol>
     <details>
@@ -2415,13 +2415,24 @@ return { handleMessage };
   const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   const fmtMB = (n) => (n / 1048576).toFixed(n > 1048576 * 100 ? 0 : 1) + ' MB';
 
+  // New picks are added to the list, so a picker that limits how many files can be chosen at once
+  // (some phone galleries stop at 10) can be used several times. The same file is not added twice.
   function setFiles(list) {
-    files = Array.from(list).filter((f) => f.size > 0).sort(naturalSort);
-    const other = files.filter((f) => !/\.dng$/i.test(f.name));
-    if (other.length) showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです`); else hideError();
-    files = files.filter((f) => /\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name));
+    const picked = Array.from(list).filter((f) => f.size > 0);
+    const other = picked.filter((f) => !/\.dng$/i.test(f.name));
+    if (other.length) {
+      const jpeg = other.some((f) => /\.(jpe?g|heic)$/i.test(f.name));
+      showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです` +
+        (jpeg ? '。iPhoneの写真ライブラリから選ぶとJPEGに変換されることがあるため、「ファイル」アプリに保存したDNGを選んでください' : ''));
+    } else hideError();
+    const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+    const have = new Set(files.map(key));
+    const add = picked.filter((f) => (/\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name)) && !have.has(key(f)));
+    if (!add.length) { renderFiles(); return; }
+    const first = files[0];
+    files = files.concat(add).sort(naturalSort);
     renderFiles();
-    if (files.length) {
+    if (files.length && files[0] !== first) {
       const id = ++exportId;
       worker.postMessage({ type: 'info', id, file: files[0] });
     }
@@ -2452,6 +2463,7 @@ return { handleMessage };
   drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) setFiles(e.dataTransfer.files); });
   $('reverse').addEventListener('click', () => { files.reverse(); renderFiles(); });
   $('clear').addEventListener('click', () => { files = []; renderFiles(); });
+  $('addMore').addEventListener('click', () => $('file').click());
 
   for (const [id, out] of [['detail', 'detailOut'], ['smooth', 'smoothOut']]) {
     $(id).addEventListener('input', () => { $(out).textContent = $(id).value; autoParams.manual = true; $('autoReset').hidden = false; $('autoText').textContent = '手動で設定しています。'; });
