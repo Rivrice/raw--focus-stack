@@ -127,6 +127,7 @@
       half: $('sizeHalf').checked,
       align: $('align').checked,
       noRotation: !$('rotate').checked,
+      matchExposure: $('matchExp').checked,
       detail: auto ? 3 : +$('detail').value,
       smooth: auto ? 2 : +$('smooth').value,
     };
@@ -234,6 +235,9 @@
     const used = m.frames.filter((f) => f.share > 0).length;
     $('stFrames').textContent = `${used} / ${m.frames.length}`;
     $('stTime').textContent = m.seconds.toFixed(1) + ' 秒';
+    const evMax = Math.max(...m.frames.map((f) => Math.abs(f.ev || 0)));
+    $('expNote').hidden = evMax < 0.02;
+    $('expNote').innerHTML = `写真ごとの露出の差を、1枚目に合わせて補正しました<span class="ph">（最大 ±${evMax.toFixed(2)}EV）。</span>`;
     const fine = m.stats && m.stats.fine || 0;
     $('adaptNote').hidden = fine < 0.01;
     $('adaptNote').innerHTML = `細かい部分として狭い範囲で判定したのは、<span class="ph">画面の約${Math.max(1, Math.round(fine * 100))}%です。</span>`;
@@ -249,7 +253,7 @@
     const colorAt = (t) => { const p = t * 6, i = Math.min(5, Math.floor(p)), f = p - i; const a = cols[i], b = cols[i + 1]; return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(',')})`; };
     m.frames.forEach((f, i) => {
       const row = document.createElement('div'); row.className = 'rail-row';
-      row.title = f.name;
+      row.title = f.ev ? `${f.name}（露出補正 ${f.ev > 0 ? '+' : ''}${f.ev.toFixed(2)}EV）` : f.name;
       const idx = document.createElement('span'); idx.className = 'i'; idx.textContent = i + 1;
       const tr = document.createElement('span'); tr.className = 'track';
       const bar = document.createElement('i'); bar.style.width = (f.share / maxShare * 100).toFixed(1) + '%'; bar.style.background = colorAt(m.frames.length > 1 ? i / (m.frames.length - 1) : 0);

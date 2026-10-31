@@ -219,6 +219,11 @@ footer a { color: inherit; }
         <label class="check"><input type="checkbox" id="rotate" checked>傾きも補正する（手持ち撮影向け）</label>
       </div>
       <div class="field">
+        <span class="lbl">明るさ</span>
+        <label class="check"><input type="checkbox" id="matchExp" checked>写真ごとの露出の差を揃えてから合成</label>
+        <small>撮影の途中で明るさが変わった写真も、1枚目の明るさに揃えてからつなぎます。</small>
+      </div>
+      <div class="field">
         <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
         <input type="range" id="detail" min="1" max="16" step="1" value="3">
         <small>小さくすると細かい部分まで見分け、大きくするとノイズや平坦な部分で誤判定しにくくなります。苔や草のような細かい部分は、この設定とは別に狭い範囲でも判定します。</small>
@@ -274,6 +279,7 @@ footer a { color: inherit; }
           <div class="stat"><b id="stTime">-</b><span>処理時間</span></div>
         </div>
         <p class="hint" id="adaptNote" hidden></p>
+        <p class="hint" id="expNote" hidden></p>
         <div class="rail" id="rail" aria-label="フレームごとの採用率"></div>
         <div class="notice" id="warn" hidden></div>
         <div class="exports">
