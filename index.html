@@ -219,6 +219,11 @@ footer a { color: inherit; }
         <label class="check"><input type="checkbox" id="rotate" checked>傾きも補正する（手持ち撮影向け）</label>
       </div>
       <div class="field">
+        <span class="lbl">明るさ</span>
+        <label class="check"><input type="checkbox" id="matchExp" checked>写真ごとの露出の差を揃えてから合成</label>
+        <small>撮影の途中で明るさが変わった写真も、1枚目の明るさに揃えてからつなぎます。</small>
+      </div>
+      <div class="field">
         <label for="detail">ピント判定の範囲 <output id="detailOut">3</output></label>
         <input type="range" id="detail" min="1" max="16" step="1" value="3">
         <small>小さくすると細かい部分まで見分け、大きくするとノイズや平坦な部分で誤判定しにくくなります。苔や草のような細かい部分は、この設定とは別に狭い範囲でも判定します。</small>
@@ -274,6 +279,7 @@ footer a { color: inherit; }
           <div class="stat"><b id="stTime">-</b><span>処理時間</span></div>
         </div>
         <p class="hint" id="adaptNote" hidden></p>
+        <p class="hint" id="expNote" hidden></p>
         <div class="rail" id="rail" aria-label="フレームごとの採用率"></div>
         <div class="notice" id="warn" hidden></div>
         <div class="exports">
@@ -1497,7 +1503,8 @@ function median3u8(src, w, h) {
 
 const yieldTick = () => new Promise((r) => setTimeout(r, 0));
 
-function compositeFrame(out, CW, CH, x0, y0, img, W, H, m, wgt, gw, gh, g) {
+// gain scales the frame to the reference exposure; clipped highlights stay at white instead of turning grey.
+function compositeFrame(out, CW, CH, x0, y0, img, W, H, m, wgt, gw, gh, g, gain = 1) {
   for (let y = 0; y < CH; y++) {
     const ry = y + y0;
     const gyf = (ry + 0.5) / g - 0.5;
@@ -1518,12 +1525,36 @@ function compositeFrame(out, CW, CH, x0, y0, img, W, H, m, wgt, gw, gh, g) {
       const w00 = (1 - fx) * (1 - fy) * wv, w01 = fx * (1 - fy) * wv, w10 = (1 - fx) * fy * wv, w11 = fx * fy * wv;
       const o = (y * CW + x) * 3;
       for (let ch = 0; ch < 3; ch++) {
-        const s = img[p00 + ch] * w00 + img[p00 + 3 + ch] * w01 + img[p10 + ch] * w10 + img[p10 + 3 + ch] * w11;
+        let s = img[p00 + ch] * w00 + img[p00 + 3 + ch] * w01 + img[p10 + ch] * w10 + img[p10 + 3 + ch] * w11;
+        if (gain !== 1) s = gain < 1 && s >= 65000 * wv ? 65535 * wv : s * gain;
         const nv = out[o + ch] + s + 0.5;
         out[o + ch] = nv > 65535 ? 65535 : nv;
       }
     }
   }
+}
+
+// Brightness of frame b relative to frame a (b ≈ ratio · a), from heavily smoothed linear luma so the
+// focus change itself does not count. rel maps a's pixels to b's (full-size px); k is the downscale.
+// Near-black and near-clipped areas are left out; the median of per-pixel log ratios ignores
+// whatever moved or changed between the two shots.
+function exposureRatio(a, b, rel, k) {
+  const A = boxBlur(a.data, a.w, a.h, 3, 2), B = boxBlur(b.data, b.w, b.h, 3, 2);
+  const logs = [];
+  for (let y = 4; y < a.h - 4; y += 2) for (let x = 4; x < a.w - 4; x += 2) {
+    const va = A[y * a.w + x];
+    if (va < 0.01 || va > 0.8) continue;
+    const fx = (x + 0.5) * k - 0.5, fy = (y + 0.5) * k - 0.5;
+    const u = (rel[0] * fx + rel[1] * fy + rel[2] + 0.5) / k - 0.5, v = (rel[3] * fx + rel[4] * fy + rel[5] + 0.5) / k - 0.5;
+    if (u < 0 || v < 0 || u >= b.w - 1 || v >= b.h - 1) continue;
+    const x0 = u | 0, y0 = v | 0, ax = u - x0, ay = v - y0, i = y0 * b.w + x0;
+    const vb = (B[i] * (1 - ax) + B[i + 1] * ax) * (1 - ay) + (B[i + b.w] * (1 - ax) + B[i + b.w + 1] * ax) * ay;
+    if (vb < 0.01 || vb > 0.8) continue;
+    logs.push(Math.log(vb / va));
+  }
+  if (logs.length < 200) return 1;
+  logs.sort((p, q) => p - q);
+  return Math.exp(logs[logs.length >> 1]);
 }
 
 // Optionally records, for the winning frame, its local brightness (mean) and fine-scale energy (Ef).
@@ -1551,6 +1582,7 @@ async function runStack(frames, opts, progress = () => {}) {
   // A second, 1-cell detection window runs alongside the user's one (opts.fine: 0 turns it off).
   const fineR = opts.fine === 0 || coarseR <= 1 ? 0 : 1;
   const affines = [];
+  const gains = []; // per-frame multiplier that brings each frame to the first frame's exposure
   const info = [];
   let prevSmall = null, k = 1;
   let prevAff = [1, 0, 0, 0, 1, 0];
@@ -1579,25 +1611,36 @@ async function runStack(frames, opts, progress = () => {}) {
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を位置合わせ中` });
     await yieldTick();
     const small = downscaleLuma(dec.data, W, H, k);
-    let aff = [1, 0, 0, 0, 1, 0];
+    let aff = [1, 0, 0, 0, 1, 0], rel = [1, 0, 0, 0, 1, 0];
     if (i > 0 && opts.align !== false) {
       const p = alignPair(prevSmall, small, { noRotation: opts.noRotation });
-      const rel = paramsToAffine(p, k, W, H, small.w, small.h);
-      const ri = affineInfo(rel, W, H);
+      const r = paramsToAffine(p, k, W, H, small.w, small.h);
+      const ri = affineInfo(r, W, H);
       if (Math.abs(ri.scale - 1) > 0.12 || Math.abs(ri.dx) > W * 0.2 || Math.abs(ri.dy) > H * 0.2 || Math.abs(ri.rot) > 8) {
         warnings.add(`${frames[i].name} の位置合わせに失敗したため、補正せずに合成しました`);
         aff = prevAff;
       } else {
-        aff = affineCompose(rel, prevAff);
+        aff = affineCompose(r, prevAff); rel = r;
       }
     }
+    let gain = 1;
+    if (i > 0 && opts.matchExposure !== false) {
+      const ratio = Math.min(4, Math.max(0.25, exposureRatio(prevSmall, small, rel, k)));
+      gain = gains[i - 1] / ratio;
+      if (Math.abs(Math.log2(gain)) < 0.01) gain = 1; // under ~1% is noise, not an exposure change
+    }
+    gains.push(gain);
     prevSmall = small; prevAff = aff;
     affines.push(aff);
-    info.push({ name: frames[i].name, ...affineInfo(aff, W, H) });
+    info.push({ name: frames[i].name, ...affineInfo(aff, W, H), ev: Math.log2(gain) });
 
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目のピントを解析中` });
     await yieldTick();
     const fe = focusEnergy(dec.data, W, H, g);
+    if (gain !== 1) { // as if measured on the exposure-matched frame (energy ∝ gain, sqrt-luma mean ∝ √gain)
+      const sg = Math.sqrt(gain);
+      for (let j = 0; j < fe.E.length; j++) { fe.E[j] *= gain; fe.M[j] *= sg; }
+    }
     const isIdentity = aff[0] === 1 && aff[1] === 0 && aff[2] === 0 && aff[3] === 0 && aff[4] === 1 && aff[5] === 0;
     const toRef = (Eb) => isIdentity ? Eb : warpGrid(Eb, fe.gw, fe.gh, g, aff, gw, gh);
     const Ec = toRef(boxBlur(fe.E, fe.gw, fe.gh, coarseR, 2));
@@ -1688,7 +1731,7 @@ async function runStack(frames, opts, progress = () => {}) {
     }
     // Dilate a 1-cell mask of where this frame contributes, to skip pixels quickly.
     const dec = await decodeDNG(await frames[i].load(), decodeOpts);
-    compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g);
+    compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g, gains[i]);
   }
   const total = gw * gh;
   info.forEach((f, i) => { f.share = share[i] / total; });
@@ -2438,6 +2481,7 @@ return { handleMessage };
       half: $('sizeHalf').checked,
       align: $('align').checked,
       noRotation: !$('rotate').checked,
+      matchExposure: $('matchExp').checked,
       detail: auto ? 3 : +$('detail').value,
       smooth: auto ? 2 : +$('smooth').value,
     };
@@ -2545,6 +2589,9 @@ return { handleMessage };
     const used = m.frames.filter((f) => f.share > 0).length;
     $('stFrames').textContent = `${used} / ${m.frames.length}`;
     $('stTime').textContent = m.seconds.toFixed(1) + ' 秒';
+    const evMax = Math.max(...m.frames.map((f) => Math.abs(f.ev || 0)));
+    $('expNote').hidden = evMax < 0.02;
+    $('expNote').innerHTML = `写真ごとの露出の差を、1枚目に合わせて補正しました<span class="ph">（最大 ±${evMax.toFixed(2)}EV）。</span>`;
     const fine = m.stats && m.stats.fine || 0;
     $('adaptNote').hidden = fine < 0.01;
     $('adaptNote').innerHTML = `細かい部分として狭い範囲で判定したのは、<span class="ph">画面の約${Math.max(1, Math.round(fine * 100))}%です。</span>`;
@@ -2560,7 +2607,7 @@ return { handleMessage };
     const colorAt = (t) => { const p = t * 6, i = Math.min(5, Math.floor(p)), f = p - i; const a = cols[i], b = cols[i + 1]; return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(',')})`; };
     m.frames.forEach((f, i) => {
       const row = document.createElement('div'); row.className = 'rail-row';
-      row.title = f.name;
+      row.title = f.ev ? `${f.name}（露出補正 ${f.ev > 0 ? '+' : ''}${f.ev.toFixed(2)}EV）` : f.name;
       const idx = document.createElement('span'); idx.className = 'i'; idx.textContent = i + 1;
       const tr = document.createElement('span'); tr.className = 'track';
       const bar = document.createElement('i'); bar.style.width = (f.share / maxShare * 100).toFixed(1) + '%'; bar.style.background = colorAt(m.frames.length > 1 ? i / (m.frames.length - 1) : 0);

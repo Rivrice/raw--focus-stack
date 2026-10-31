@@ -5,7 +5,7 @@
   "description": "スマホのブラウザで動くDNG(RAW)フォーカスブラケット深度合成ツール",
   "scripts": {
     "build": "node build.js",
-    "test": "node test/stack.test.js && node test/grass.test.js && node test/lj92.js"
+    "test": "node test/stack.test.js && node test/grass.test.js && node test/exposure.test.js && node test/lj92.js"
   },
   "license": "MIT"
 }
