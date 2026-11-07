@@ -3,8 +3,9 @@
 function srgbEncode(x) { return x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055; }
 
 // Tone LUT over linear values 0..8 (after exposure): soft highlight shoulder, then sRGB.
-function makeToneLUT(bits) {
-  const N = 8192, maxV = (1 << bits) - 1, t = 0.8;
+// display: input was already a rendered image (JPEG, TIFF...), so only the sRGB curve, no highlight shoulder.
+function makeToneLUT(bits, display) {
+  const N = 8192, maxV = (1 << bits) - 1, t = display ? 1 : 0.8;
   const lut = bits > 8 ? new Uint16Array(N + 1) : new Uint8Array(N + 1);
   for (let i = 0; i <= N; i++) {
     let x = (i / N) * 8;
@@ -22,7 +23,7 @@ function renderImage(src, w, h, rt, opts = {}) {
   const ow = Math.floor(w / step), oh = Math.floor(h / step);
   const ch = bits === 8 ? 4 : 3;
   const out = bits === 8 ? new Uint8ClampedArray(ow * oh * 4) : new Uint16Array(ow * oh * 3);
-  const lut = makeToneLUT(bits);
+  const lut = makeToneLUT(bits, rt.display);
   const gain = Math.pow(2, (rt.baselineExposure || 0) + (opts.exposure || 0));
   const M = rt.matrix.map((v) => v * gain);
   const wb = rt.wb;

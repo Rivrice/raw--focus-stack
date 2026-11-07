@@ -205,7 +205,7 @@ async function runStack(frames, opts, progress = () => {}) {
   for (let i = 0; i < N; i++) {
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を読み込み中` });
     await yieldTick();
-    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    const dec = await decodeInput(await frames[i].load(), decodeOpts);
     (dec.meta.warnings || []).forEach((w) => warnings.add(w));
     if (i === 0) {
       if (opts.onFirstFrame) opts.onFirstFrame(dec);
@@ -218,6 +218,8 @@ async function runStack(frames, opts, progress = () => {}) {
         meanF = new Uint16Array(gw * gh); meanC = new Uint16Array(gw * gh); efC = new Float32Array(gw * gh);
       }
       k = Math.max(1, Math.ceil(Math.max(W, H) / 720));
+    } else if (!!dec.meta.display !== !!refMeta.display) {
+      throw new Error(`${frames[i].name} はRAW以外の画像です。RAW（DNG）とJPEGなどの画像は混ぜて合成できません`);
     } else if (dec.width !== W || dec.height !== H) {
       throw new Error(`${frames[i].name} の画像サイズ(${dec.width}×${dec.height})が1枚目(${W}×${H})と異なります`);
     }
@@ -343,7 +345,7 @@ async function runStack(frames, opts, progress = () => {}) {
       for (let j = 0; j < gw * gh; j++) wgt[j] = tight[j] + (wgt[j] - tight[j]) * calm[j];
     }
     // Dilate a 1-cell mask of where this frame contributes, to skip pixels quickly.
-    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    const dec = await decodeInput(await frames[i].load(), decodeOpts);
     compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g, gains[i]);
   }
   const total = gw * gh;

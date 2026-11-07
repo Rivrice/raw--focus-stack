@@ -61,19 +61,22 @@
   const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   const fmtMB = (n) => (n / 1048576).toFixed(n > 1048576 * 100 ? 0 : 1) + ' MB';
 
+  const INPUT_EXT = /\.(dng|jpe?g|heic|heif|png|webp|avif|tiff?)$/i;
+  const CAMERA_RAW_EXT = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|srw|x3f|3fr|iiq|erf|mef|mos|kdc|dcr|rwl)$/i;
+
   // New picks are added to the list, so a picker that limits how many files can be chosen at once
   // (some phone galleries stop at 10) can be used several times. The same file is not added twice.
   function setFiles(list) {
     const picked = Array.from(list).filter((f) => f.size > 0);
-    const other = picked.filter((f) => !/\.dng$/i.test(f.name));
-    if (other.length) {
-      const jpeg = other.some((f) => /\.(jpe?g|heic)$/i.test(f.name));
-      showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです` +
-        (jpeg ? '。iPhoneの写真ライブラリから選ぶとJPEGに変換されることがあるため、「ファイル」アプリに保存したDNGを選んでください' : ''));
-    } else hideError();
+    const ok = (f) => INPUT_EXT.test(f.name) || !/\.[a-z0-9]{2,5}$/i.test(f.name); // files without an extension are sniffed by content
+    const rawOther = picked.filter((f) => CAMERA_RAW_EXT.test(f.name)), other = picked.filter((f) => !ok(f) && !CAMERA_RAW_EXT.test(f.name));
+    const names = (l) => l.slice(0, 3).map((f) => f.name).join(', ') + (l.length > 3 ? ' など' : '');
+    if (rawOther.length) showError(`カメラ固有のRAW（${names(rawOther)}）は読み込めません。Adobe DNG Converter や Lightroom でDNGに変換してから選んでください`);
+    else if (other.length) showError(`読み込めない形式のファイル（${names(other)}）を除きました。DNG・JPEG・HEIC・PNG・WebP・AVIF・TIFFに対応しています`);
+    else hideError();
     const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
     const have = new Set(files.map(key));
-    const add = picked.filter((f) => (/\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name)) && !have.has(key(f)));
+    const add = picked.filter((f) => ok(f) && !have.has(key(f)));
     if (!add.length) { renderFiles(); return; }
     const first = files[0];
     files = files.concat(add).sort(naturalSort);
@@ -192,10 +195,11 @@
       const i = m.info;
       const comp = { 1: '非圧縮', 7: 'ロスレス圧縮', 8: 'Deflate圧縮', 34892: '非可逆圧縮', 52546: 'JPEG XL圧縮' }[i.compression] || ('圧縮' + i.compression);
       const mp = (i.width * i.height / 1e6).toFixed(1);
-      $('fileMeta').textContent = `${files.length}枚・${[i.make, i.model].filter(Boolean).join(' ')}・${i.width}×${i.height}（${mp}MP）・${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
+      const kind = i.display ? `${i.format}（RAWではない画像）` : `${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
+      $('fileMeta').textContent = [`${files.length}枚`, [i.make, i.model].filter(Boolean).join(' '), `${i.width}×${i.height}（${mp}MP）`, kind].filter(Boolean).join('・');
       if (i.width * i.height > 30e6) {
         $('sizeHalf').checked = true;
-        $('sizeHint').textContent = `${mp}MPと大きなRAWなので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
+        $('sizeHint').textContent = `${mp}MPと大きな画像なので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
       }
       autoParams.w = i.width; autoParams.h = i.height; autoParams.manual = false; $('autoReset').hidden = true;
       applyAutoParams(true);
@@ -241,6 +245,8 @@
     $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
     $('tabCompare').hidden = !m.first;
     document.querySelector('[data-fmt="compare"]').hidden = !m.first;
+    document.querySelector('[data-fmt="dng"]').hidden = !!m.display; // a JPEG/TIFF stack has no RAW data to keep
+    $('displayNote').hidden = !m.display;
     $('zoombox').hidden = true;
     drawView();
     $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);
