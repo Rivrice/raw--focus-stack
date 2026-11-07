@@ -1,7 +1,7 @@
 // Builds the single-file app: index.html (GitHub Pages / any static host).
 const fs = require('fs'), path = require('path');
 const s = (f) => fs.readFileSync(path.join(__dirname, 'src', f), 'utf8');
-const core = ['tiff.js', 'ljpeg.js', 'dng.js', 'align.js', 'engine.js', 'output.js', 'worker.js'].map(s).join('\n');
+const core = ['tiff.js', 'ljpeg.js', 'dng.js', 'image.js', 'align.js', 'engine.js', 'output.js', 'worker.js'].map(s).join('\n');
 if (/<\/script/i.test(core + s('ui.js'))) throw new Error('script close tag in source');
 const page = s('page.html').replace('/*__CORE__*/', () => core).replace('/*__UI__*/', () => s('ui.js'));
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });

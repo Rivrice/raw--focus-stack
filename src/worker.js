@@ -79,7 +79,7 @@ async function handleMessage(msg, post) {
       post({ type: 'pong' });
     } else if (msg.type === 'info') {
       const buf = await msg.file.arrayBuffer();
-      const info = readDNGInfo(buf);
+      const info = await readInputInfo(buf);
       post({ type: 'info', id: msg.id, info });
     } else if (msg.type === 'run') {
       state.result = null;
@@ -117,7 +117,7 @@ async function handleMessage(msg, post) {
         type: 'done', demo: !!msg.demo, first: fp,
         preview: { data: pv.data, w: pv.w, h: pv.h }, depth: { data: dp.data, w: dp.w, h: dp.h },
         width: res.width, height: res.height, frames: res.frames, warnings: res.warnings, seconds: res.seconds,
-        stats: { fine: res.stats.fine || 0 },
+        stats: { fine: res.stats.fine || 0 }, display: !!res.meta.display,
         camera: res.meta.uniqueModel, orientation: res.meta.orientation,
       }, [pv.data.buffer, dp.data.buffer].concat(fp ? [fp.data.buffer] : []));
     } else if (msg.type === 'preview') {

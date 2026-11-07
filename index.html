@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style></head><body><title>RAW深度合成</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
+<meta name="description" content="スマホのブラウザでDNG(RAW)やJPEGのフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
 <style>
 /* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
 :root {
@@ -172,9 +172,9 @@ footer a { color: inherit; }
 <div class="wrap" lang="ja">
   <header>
     <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
-    <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
+    <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）やJPEGなどの写真を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
     <div class="formats" aria-label="対応形式">
-      <span class="chip">入力 DNG（ベイヤー / LinearRaw）</span>
+      <span class="chip">入力 DNG</span><span class="chip">JPEG・HEIC・PNG・TIFF など</span>
       <span class="chip">出力 DNG</span><span class="chip">16bit TIFF</span><span class="chip">JPEG</span>
     </div>
   </header>
@@ -182,9 +182,9 @@ footer a { color: inherit; }
   <section class="step" aria-labelledby="s1">
     <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
     <div class="drop" id="drop">
-      <strong>DNGファイルをまとめて選択</strong>
-      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
-      <input type="file" id="file" multiple aria-label="DNGファイルを選択">
+      <strong>写真をまとめて選択</strong>
+      <span>ピント位置を変えて撮った2枚以上の写真（DNG・JPEGなど）を選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
+      <input type="file" id="file" multiple aria-label="写真を選択">
     </div>
     <p class="hint">一度に選べる枚数が限られているときは、何回かに分けて選んでください。選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
     <div class="filebar" id="filebar" hidden>
@@ -193,8 +193,10 @@ footer a { color: inherit; }
     </div>
     <ol class="files" id="fileList" hidden></ol>
     <details>
-      <summary>対応しているRAWについて</summary>
+      <summary>対応している形式について</summary>
       <ul>
+        <li>DNG（RAW）のほか、JPEG・HEIC・HEIF・PNG・WebP・AVIF・TIFF（8bit / 16bit）を読み込めます。HEICとHEIFはSafariなど、対応しているブラウザだけで読み込めます。</li>
+        <li>RAWではない画像を合成したときは、保存できる形式はTIFFとJPEGだけになります。RAWとそれ以外の画像を混ぜて合成することはできません。</li>
         <li>iPhone（ProRAW / サードパーティアプリのRAW）、Pixel・Galaxy・Xperiaなど Android のDNGに対応しています。</li>
         <li>カメラ固有のRAW（CR3 / NEF / ARW / RAF など）は、Adobe DNG Converter や Lightroom で DNG に変換してから読み込んでください。</li>
         <li>X-Trans センサーのDNG、浮動小数点DNG（HDR合成済み）には対応していません。</li>
@@ -288,6 +290,7 @@ footer a { color: inherit; }
           <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有やSNS向け</span></button>
           <button type="button" data-fmt="compare"><b>比較JPEGで保存</b><span>合成前後を並べた1枚。作例の紹介向け</span></button>
         </div>
+        <p class="hint" id="displayNote" hidden>RAWではない画像から合成したため、DNGでは保存できません。</p>
         <div class="saved" id="saved" aria-live="polite"></div>
       </div>
     </div>
@@ -956,6 +959,7 @@ function readColorMeta(r, ifd0, rawIfd, spp) {
 
 // Matrix taking white-balanced camera RGB to linear sRGB, plus WB multipliers.
 function renderTransform(meta) {
+  if (meta.display) return { wb: [1, 1, 1], matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1], baselineExposure: 0, display: true };
   let cm = meta.colorMatrix1, cc = meta.cameraCalibration1;
   if (meta.colorMatrix2 && (meta.illuminant2 === 21 || meta.illuminant2 === 23 || !meta.colorMatrix1)) { cm = meta.colorMatrix2; cc = meta.cameraCalibration2; }
   if (!cm) cm = mat3inv(XYZ_FROM_SRGB); // no colour info: treat as sRGB
@@ -1005,12 +1009,13 @@ async function readSamples(r, ifd, raw, W, H, spp, bps, comp) {
     } else if (comp === 7) {
       const j = decodeLJ92(bytes);
       tile = j.data;
-    } else if (comp === 8) {
-      const inflated = await inflate(bytes);
-      tile = unpackBits(inflated, tw, rows, spp, bps, r.le);
+    } else if (comp === 8 || comp === 32946 || comp === 5) {
+      const unpacked = comp === 5 ? lzwDecode(bytes) : await inflate(bytes);
+      tile = unpackBits(unpacked, tw, rows, spp, bps, r.le);
       if (predictor === 2) {
+        const mask = bps === 8 ? 0xff : 0xffff;
         for (let y = 0; y < rows; y++) for (let x = 1; x < tw; x++) for (let s = 0; s < spp; s++) {
-          const i = (y * tw + x) * spp + s; tile[i] = (tile[i] + tile[i - spp]) & 0xffff;
+          const i = (y * tw + x) * spp + s; tile[i] = (tile[i] + tile[i - spp]) & mask;
         }
       } else if (predictor !== 1) throw new Error('未対応の予測方式(Predictor ' + predictor + ')です');
     } else if (comp === 34892 || comp === 52546) {
@@ -1028,6 +1033,42 @@ async function readSamples(r, ifd, raw, W, H, spp, bps, comp) {
       raw.set(tile.subarray(src, Math.min(src + copyW, tile.length)), ((ty + y) * W + tx) * spp);
     }
   }
+}
+
+// TIFF LZW (MSB-first codes, 9-12 bits, early change), as written by Photoshop and most editors.
+function lzwDecode(src) {
+  let out = new Uint8Array(Math.max(1024, src.length * 4)), n = 0;
+  const ensure = (k) => { if (n + k > out.length) { const o = new Uint8Array(Math.max(out.length * 2, n + k)); o.set(out.subarray(0, n)); out = o; } };
+  const pre = new Int32Array(4096), last = new Uint8Array(4096), len = new Uint16Array(4096);
+  for (let i = 0; i < 256; i++) { pre[i] = -1; last[i] = i; len[i] = 1; }
+  let next = 258, width = 9, bitPos = 0, prev = -1;
+  const total = src.length * 8;
+  const emit = (code) => { // writes the string for code, returns its first byte
+    const l = len[code]; ensure(l);
+    let c = code;
+    for (let i = l - 1; i >= 0; i--) { out[n + i] = last[c]; c = pre[c]; }
+    n += l;
+    return out[n - l];
+  };
+  while (bitPos + width <= total) {
+    let code = 0;
+    for (let i = 0; i < width; i++) { const b = bitPos + i; code = (code << 1) | ((src[b >> 3] >> (7 - (b & 7))) & 1); }
+    bitPos += width;
+    if (code === 257) break;
+    if (code === 256) { next = 258; width = 9; prev = -1; continue; }
+    let first;
+    if (prev < 0) { first = emit(code); }
+    else if (code < next) {
+      first = emit(code);
+      if (next < 4096) { pre[next] = prev; last[next] = first; len[next] = len[prev] + 1; next++; }
+    } else { // code === next: prev's string + its own first byte
+      const f = emit(prev); ensure(1); out[n++] = f; first = f;
+      if (next < 4096) { pre[next] = prev; last[next] = f; len[next] = len[prev] + 1; next++; }
+    }
+    prev = code;
+    if (next + 1 >= (1 << width) && width < 12) width++;
+  }
+  return out.subarray(0, n);
 }
 
 function unpackBits(bytes, w, rows, spp, bps, le) {
@@ -1212,6 +1253,126 @@ function demosaicEdge(m, w, h, pat) {
     }
   }
   return out;
+}
+
+// ---- Non-RAW inputs: JPEG / HEIC / PNG / WebP / AVIF (browser decoder) and RGB TIFF ----
+// These are already rendered (display-referred sRGB). They are turned into linear 16-bit RGB so
+// focus detection, exposure matching and blending work the same as for RAW; meta.display tells the
+// renderer to apply only the sRGB curve, without the RAW tone curve or colour matrix.
+
+const SRGB_TO_LINEAR16 = (() => {
+  const make = (n) => {
+    const lut = new Uint16Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = i / (n - 1);
+      lut[i] = Math.round((v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)) * 65535);
+    }
+    return lut;
+  };
+  let l8 = null, l16 = null;
+  return (bits) => bits > 8 ? (l16 || (l16 = make(65536))) : (l8 || (l8 = make(256)));
+})();
+
+function isTiffBuffer(buf) {
+  const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  return b.length === 4 && ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 42 && b[3] === 0) || (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0 && b[3] === 42));
+}
+
+function imageKind(buf) {
+  const b = new Uint8Array(buf, 0, Math.min(16, buf.byteLength));
+  const s = (o, n) => String.fromCharCode(...b.subarray(o, o + n));
+  if (b[0] === 0xff && b[1] === 0xd8) return 'JPEG';
+  if (b[0] === 0x89 && s(1, 3) === 'PNG') return 'PNG';
+  if (s(0, 4) === 'RIFF' && s(8, 4) === 'WEBP') return 'WebP';
+  if (s(4, 4) === 'ftyp') { const brand = s(8, 4); return /avi[fs]/.test(brand) ? 'AVIF' : 'HEIC'; }
+  return '';
+}
+
+function displayMeta(w, h, format) {
+  return {
+    display: true, format, make: '', model: '', uniqueModel: format, orientation: 1, dateTime: '', warnings: [],
+    crop: { x: 0, y: 0, w, h }, cfa: false, sourceWidth: w, sourceHeight: h, baselineExposure: 0,
+  };
+}
+
+// 8- or 16-bit RGB(A) samples (spp channels, gamma-encoded) -> linear Uint16 RGB, optionally 2×2-binned.
+function linearizeRGB(src, w, h, spp, bits, half) {
+  const lut = SRGB_TO_LINEAR16(bits);
+  if (!half) {
+    const out = new Uint16Array(w * h * 3);
+    for (let i = 0, o = 0; i < w * h; i++, o += 3) {
+      const p = i * spp;
+      out[o] = lut[src[p]]; out[o + 1] = lut[src[p + (spp > 2 ? 1 : 0)]]; out[o + 2] = lut[src[p + (spp > 2 ? 2 : 0)]];
+    }
+    return { data: out, w, h };
+  }
+  const ow = w >> 1, oh = h >> 1, out = new Uint16Array(ow * oh * 3);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) for (let c = 0; c < 3; c++) {
+    const cc = spp > 2 ? c : 0;
+    const p = ((2 * y) * w + 2 * x) * spp + cc, q = p + w * spp;
+    out[(y * ow + x) * 3 + c] = (lut[src[p]] + lut[src[p + spp]] + lut[src[q]] + lut[src[q + spp]] + 2) >> 2;
+  }
+  return { data: out, w: ow, h: oh };
+}
+
+async function decodeTiffImage(buffer, opts = {}) {
+  const r = new TiffReader(buffer);
+  const ifd = r.ifds[0];
+  const W = r.value(ifd, TAG.ImageWidth, 0), H = r.value(ifd, TAG.ImageLength, 0);
+  const spp = r.value(ifd, TAG.SamplesPerPixel, 1), bps = r.value(ifd, TAG.BitsPerSample, 8);
+  const ph = r.value(ifd, TAG.Photometric, 2), comp = r.value(ifd, TAG.Compression, 1);
+  if (!W || !H) throw new Error('TIFFの画像サイズが読み取れません');
+  if (r.value(ifd, TAG.SampleFormat, 1) === 3) throw new Error('浮動小数点のTIFFには未対応です');
+  if (bps !== 8 && bps !== 16) throw new Error(`${bps}bitのTIFFには未対応です（8bit・16bitに対応）`);
+  if (ph !== 1 && ph !== 2) throw new Error('RGBかグレースケールのTIFFにだけ対応しています');
+  if (r.value(ifd, TAG.PlanarConfig, 1) !== 1) throw new Error('プレーナ形式のTIFFには未対応です');
+  const raw = new Uint16Array(W * H * spp);
+  await readSamples(r, ifd, raw, W, H, spp, bps, comp);
+  const lin = linearizeRGB(raw, W, H, spp, bps, !!opts.half);
+  const meta = displayMeta(lin.w, lin.h, `TIFF ${bps}bit`);
+  meta.orientation = r.value(ifd, TAG.Orientation, 1);
+  meta.make = r.value(ifd, TAG.Make, ''); meta.model = r.value(ifd, TAG.Model, '');
+  return { width: lin.w, height: lin.h, data: lin.data, meta };
+}
+
+async function decodeBrowserImage(buffer, opts = {}) {
+  const kind = imageKind(buffer) || '画像';
+  if (typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') {
+    throw new Error(`このブラウザでは${kind}を読み込めません。新しいSafariかChromeで開いてください`);
+  }
+  let bmp;
+  try { bmp = await createImageBitmap(new Blob([buffer])); } catch (e) {
+    throw new Error(kind === 'HEIC' ? 'このブラウザではHEICを読み込めません。Safariで開くか、JPEGかDNGで撮影してください' : `${kind}を読み込めませんでした`);
+  }
+  const W = bmp.width, H = bmp.height; // EXIF orientation is already applied by the decoder
+  const c = new OffscreenCanvas(W, H), g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  bmp.close && bmp.close();
+  const px = g.getImageData(0, 0, W, H).data;
+  const lin = linearizeRGB(px, W, H, 4, 8, !!opts.half);
+  return { width: lin.w, height: lin.h, data: lin.data, meta: displayMeta(lin.w, lin.h, kind) };
+}
+
+// Any supported input: DNG, RGB TIFF, or a browser-decodable image.
+async function decodeInput(buffer, opts = {}) {
+  if (isTiffBuffer(buffer)) {
+    const r = new TiffReader(buffer);
+    if (r.has(r.ifds[0], TAG.DNGVersion)) return decodeDNG(buffer, opts);
+    if (findRawIFD(r)) throw new Error('カメラ固有のRAW（CR2/NEF/ARWなど）には未対応です。Adobe DNG Converter等でDNGに変換してください');
+    return decodeTiffImage(buffer, opts);
+  }
+  return decodeBrowserImage(buffer, opts);
+}
+
+async function readInputInfo(buffer) {
+  if (isTiffBuffer(buffer)) {
+    const r = new TiffReader(buffer);
+    if (r.has(r.ifds[0], TAG.DNGVersion) || findRawIFD(r)) return readDNGInfo(buffer);
+    const ifd = r.ifds[0];
+    return { display: true, format: `TIFF ${r.value(ifd, TAG.BitsPerSample, 8)}bit`, make: r.value(ifd, TAG.Make, ''), model: r.value(ifd, TAG.Model, ''), width: r.value(ifd, TAG.ImageWidth, 0), height: r.value(ifd, TAG.ImageLength, 0) };
+  }
+  const d = await decodeBrowserImage(buffer, {});
+  return { display: true, format: d.meta.format, make: '', model: '', width: d.width, height: d.height };
 }
 
 // ---- Image alignment: similarity transform (scale, rotation, shift) by pyramidal Gauss-Newton ----
@@ -1592,7 +1753,7 @@ async function runStack(frames, opts, progress = () => {}) {
   for (let i = 0; i < N; i++) {
     progress({ phase: 1, frame: i, total: N, text: `${i + 1}/${N} 枚目を読み込み中` });
     await yieldTick();
-    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    const dec = await decodeInput(await frames[i].load(), decodeOpts);
     (dec.meta.warnings || []).forEach((w) => warnings.add(w));
     if (i === 0) {
       if (opts.onFirstFrame) opts.onFirstFrame(dec);
@@ -1605,6 +1766,8 @@ async function runStack(frames, opts, progress = () => {}) {
         meanF = new Uint16Array(gw * gh); meanC = new Uint16Array(gw * gh); efC = new Float32Array(gw * gh);
       }
       k = Math.max(1, Math.ceil(Math.max(W, H) / 720));
+    } else if (!!dec.meta.display !== !!refMeta.display) {
+      throw new Error(`${frames[i].name} はRAW以外の画像です。RAW（DNG）とJPEGなどの画像は混ぜて合成できません`);
     } else if (dec.width !== W || dec.height !== H) {
       throw new Error(`${frames[i].name} の画像サイズ(${dec.width}×${dec.height})が1枚目(${W}×${H})と異なります`);
     }
@@ -1730,7 +1893,7 @@ async function runStack(frames, opts, progress = () => {}) {
       for (let j = 0; j < gw * gh; j++) wgt[j] = tight[j] + (wgt[j] - tight[j]) * calm[j];
     }
     // Dilate a 1-cell mask of where this frame contributes, to skip pixels quickly.
-    const dec = await decodeDNG(await frames[i].load(), decodeOpts);
+    const dec = await decodeInput(await frames[i].load(), decodeOpts);
     compositeFrame(out, CW, CH, x0, y0, dec.data, W, H, affines[i], wgt, gw, gh, g, gains[i]);
   }
   const total = gw * gh;
@@ -1747,8 +1910,9 @@ async function runStack(frames, opts, progress = () => {}) {
 function srgbEncode(x) { return x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055; }
 
 // Tone LUT over linear values 0..8 (after exposure): soft highlight shoulder, then sRGB.
-function makeToneLUT(bits) {
-  const N = 8192, maxV = (1 << bits) - 1, t = 0.8;
+// display: input was already a rendered image (JPEG, TIFF...), so only the sRGB curve, no highlight shoulder.
+function makeToneLUT(bits, display) {
+  const N = 8192, maxV = (1 << bits) - 1, t = display ? 1 : 0.8;
   const lut = bits > 8 ? new Uint16Array(N + 1) : new Uint8Array(N + 1);
   for (let i = 0; i <= N; i++) {
     let x = (i / N) * 8;
@@ -1766,7 +1930,7 @@ function renderImage(src, w, h, rt, opts = {}) {
   const ow = Math.floor(w / step), oh = Math.floor(h / step);
   const ch = bits === 8 ? 4 : 3;
   const out = bits === 8 ? new Uint8ClampedArray(ow * oh * 4) : new Uint16Array(ow * oh * 3);
-  const lut = makeToneLUT(bits);
+  const lut = makeToneLUT(bits, rt.display);
   const gain = Math.pow(2, (rt.baselineExposure || 0) + (opts.exposure || 0));
   const M = rt.matrix.map((v) => v * gain);
   const wb = rt.wb;
@@ -2257,7 +2421,7 @@ async function handleMessage(msg, post) {
       post({ type: 'pong' });
     } else if (msg.type === 'info') {
       const buf = await msg.file.arrayBuffer();
-      const info = readDNGInfo(buf);
+      const info = await readInputInfo(buf);
       post({ type: 'info', id: msg.id, info });
     } else if (msg.type === 'run') {
       state.result = null;
@@ -2295,7 +2459,7 @@ async function handleMessage(msg, post) {
         type: 'done', demo: !!msg.demo, first: fp,
         preview: { data: pv.data, w: pv.w, h: pv.h }, depth: { data: dp.data, w: dp.w, h: dp.h },
         width: res.width, height: res.height, frames: res.frames, warnings: res.warnings, seconds: res.seconds,
-        stats: { fine: res.stats.fine || 0 },
+        stats: { fine: res.stats.fine || 0 }, display: !!res.meta.display,
         camera: res.meta.uniqueModel, orientation: res.meta.orientation,
       }, [pv.data.buffer, dp.data.buffer].concat(fp ? [fp.data.buffer] : []));
     } else if (msg.type === 'preview') {
@@ -2415,19 +2579,22 @@ return { handleMessage };
   const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   const fmtMB = (n) => (n / 1048576).toFixed(n > 1048576 * 100 ? 0 : 1) + ' MB';
 
+  const INPUT_EXT = /\.(dng|jpe?g|heic|heif|png|webp|avif|tiff?)$/i;
+  const CAMERA_RAW_EXT = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|srw|x3f|3fr|iiq|erf|mef|mos|kdc|dcr|rwl)$/i;
+
   // New picks are added to the list, so a picker that limits how many files can be chosen at once
   // (some phone galleries stop at 10) can be used several times. The same file is not added twice.
   function setFiles(list) {
     const picked = Array.from(list).filter((f) => f.size > 0);
-    const other = picked.filter((f) => !/\.dng$/i.test(f.name));
-    if (other.length) {
-      const jpeg = other.some((f) => /\.(jpe?g|heic)$/i.test(f.name));
-      showError(`DNG以外のファイル（${other.slice(0, 3).map((f) => f.name).join(', ')}${other.length > 3 ? ' など' : ''}）が含まれています。合成に使えるのはDNGだけです` +
-        (jpeg ? '。iPhoneの写真ライブラリから選ぶとJPEGに変換されることがあるため、「ファイル」アプリに保存したDNGを選んでください' : ''));
-    } else hideError();
+    const ok = (f) => INPUT_EXT.test(f.name) || !/\.[a-z0-9]{2,5}$/i.test(f.name); // files without an extension are sniffed by content
+    const rawOther = picked.filter((f) => CAMERA_RAW_EXT.test(f.name)), other = picked.filter((f) => !ok(f) && !CAMERA_RAW_EXT.test(f.name));
+    const names = (l) => l.slice(0, 3).map((f) => f.name).join(', ') + (l.length > 3 ? ' など' : '');
+    if (rawOther.length) showError(`カメラ固有のRAW（${names(rawOther)}）は読み込めません。Adobe DNG Converter や Lightroom でDNGに変換してから選んでください`);
+    else if (other.length) showError(`読み込めない形式のファイル（${names(other)}）を除きました。DNG・JPEG・HEIC・PNG・WebP・AVIF・TIFFに対応しています`);
+    else hideError();
     const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
     const have = new Set(files.map(key));
-    const add = picked.filter((f) => (/\.dng$/i.test(f.name) || !/\.(jpe?g|heic|png|mov|mp4)$/i.test(f.name)) && !have.has(key(f)));
+    const add = picked.filter((f) => ok(f) && !have.has(key(f)));
     if (!add.length) { renderFiles(); return; }
     const first = files[0];
     files = files.concat(add).sort(naturalSort);
@@ -2546,10 +2713,11 @@ return { handleMessage };
       const i = m.info;
       const comp = { 1: '非圧縮', 7: 'ロスレス圧縮', 8: 'Deflate圧縮', 34892: '非可逆圧縮', 52546: 'JPEG XL圧縮' }[i.compression] || ('圧縮' + i.compression);
       const mp = (i.width * i.height / 1e6).toFixed(1);
-      $('fileMeta').textContent = `${files.length}枚・${[i.make, i.model].filter(Boolean).join(' ')}・${i.width}×${i.height}（${mp}MP）・${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
+      const kind = i.display ? `${i.format}（RAWではない画像）` : `${i.cfa ? 'ベイヤー' : 'LinearRaw'}・${comp}`;
+      $('fileMeta').textContent = [`${files.length}枚`, [i.make, i.model].filter(Boolean).join(' '), `${i.width}×${i.height}（${mp}MP）`, kind].filter(Boolean).join('・');
       if (i.width * i.height > 30e6) {
         $('sizeHalf').checked = true;
-        $('sizeHint').textContent = `${mp}MPと大きなRAWなので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
+        $('sizeHint').textContent = `${mp}MPと大きな画像なので、1/2を選んでいます。メモリに余裕のある端末なら、フル解像度も使えます。`;
       }
       autoParams.w = i.width; autoParams.h = i.height; autoParams.manual = false; $('autoReset').hidden = true;
       applyAutoParams(true);
@@ -2595,6 +2763,8 @@ return { handleMessage };
     $('demoBadge').textContent = `サンプル #${demoCount}・${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 合成`;
     $('tabCompare').hidden = !m.first;
     document.querySelector('[data-fmt="compare"]').hidden = !m.first;
+    document.querySelector('[data-fmt="dng"]').hidden = !!m.display; // a JPEG/TIFF stack has no RAW data to keep
+    $('displayNote').hidden = !m.display;
     $('zoombox').hidden = true;
     drawView();
     $('stSize').textContent = (m.orientation >= 5 ? `${m.height}×${m.width}` : `${m.width}×${m.height}`);

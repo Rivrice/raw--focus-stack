@@ -177,6 +177,7 @@ function readColorMeta(r, ifd0, rawIfd, spp) {
 
 // Matrix taking white-balanced camera RGB to linear sRGB, plus WB multipliers.
 function renderTransform(meta) {
+  if (meta.display) return { wb: [1, 1, 1], matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1], baselineExposure: 0, display: true };
   let cm = meta.colorMatrix1, cc = meta.cameraCalibration1;
   if (meta.colorMatrix2 && (meta.illuminant2 === 21 || meta.illuminant2 === 23 || !meta.colorMatrix1)) { cm = meta.colorMatrix2; cc = meta.cameraCalibration2; }
   if (!cm) cm = mat3inv(XYZ_FROM_SRGB); // no colour info: treat as sRGB
@@ -226,12 +227,13 @@ async function readSamples(r, ifd, raw, W, H, spp, bps, comp) {
     } else if (comp === 7) {
       const j = decodeLJ92(bytes);
       tile = j.data;
-    } else if (comp === 8) {
-      const inflated = await inflate(bytes);
-      tile = unpackBits(inflated, tw, rows, spp, bps, r.le);
+    } else if (comp === 8 || comp === 32946 || comp === 5) {
+      const unpacked = comp === 5 ? lzwDecode(bytes) : await inflate(bytes);
+      tile = unpackBits(unpacked, tw, rows, spp, bps, r.le);
       if (predictor === 2) {
+        const mask = bps === 8 ? 0xff : 0xffff;
         for (let y = 0; y < rows; y++) for (let x = 1; x < tw; x++) for (let s = 0; s < spp; s++) {
-          const i = (y * tw + x) * spp + s; tile[i] = (tile[i] + tile[i - spp]) & 0xffff;
+          const i = (y * tw + x) * spp + s; tile[i] = (tile[i] + tile[i - spp]) & mask;
         }
       } else if (predictor !== 1) throw new Error('未対応の予測方式(Predictor ' + predictor + ')です');
     } else if (comp === 34892 || comp === 52546) {
@@ -249,6 +251,42 @@ async function readSamples(r, ifd, raw, W, H, spp, bps, comp) {
       raw.set(tile.subarray(src, Math.min(src + copyW, tile.length)), ((ty + y) * W + tx) * spp);
     }
   }
+}
+
+// TIFF LZW (MSB-first codes, 9-12 bits, early change), as written by Photoshop and most editors.
+function lzwDecode(src) {
+  let out = new Uint8Array(Math.max(1024, src.length * 4)), n = 0;
+  const ensure = (k) => { if (n + k > out.length) { const o = new Uint8Array(Math.max(out.length * 2, n + k)); o.set(out.subarray(0, n)); out = o; } };
+  const pre = new Int32Array(4096), last = new Uint8Array(4096), len = new Uint16Array(4096);
+  for (let i = 0; i < 256; i++) { pre[i] = -1; last[i] = i; len[i] = 1; }
+  let next = 258, width = 9, bitPos = 0, prev = -1;
+  const total = src.length * 8;
+  const emit = (code) => { // writes the string for code, returns its first byte
+    const l = len[code]; ensure(l);
+    let c = code;
+    for (let i = l - 1; i >= 0; i--) { out[n + i] = last[c]; c = pre[c]; }
+    n += l;
+    return out[n - l];
+  };
+  while (bitPos + width <= total) {
+    let code = 0;
+    for (let i = 0; i < width; i++) { const b = bitPos + i; code = (code << 1) | ((src[b >> 3] >> (7 - (b & 7))) & 1); }
+    bitPos += width;
+    if (code === 257) break;
+    if (code === 256) { next = 258; width = 9; prev = -1; continue; }
+    let first;
+    if (prev < 0) { first = emit(code); }
+    else if (code < next) {
+      first = emit(code);
+      if (next < 4096) { pre[next] = prev; last[next] = first; len[next] = len[prev] + 1; next++; }
+    } else { // code === next: prev's string + its own first byte
+      const f = emit(prev); ensure(1); out[n++] = f; first = f;
+      if (next < 4096) { pre[next] = prev; last[next] = f; len[next] = len[prev] + 1; next++; }
+    }
+    prev = code;
+    if (next + 1 >= (1 << width) && width < 12) width++;
+  }
+  return out.subarray(0, n);
 }
 
 function unpackBits(bytes, w, rows, spp, bps, le) {

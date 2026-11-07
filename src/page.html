@@ -1,6 +1,6 @@
 <title>RAW深度合成</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="スマホのブラウザでDNG(RAW)のフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
+<meta name="description" content="スマホのブラウザでDNG(RAW)やJPEGのフォーカスブラケットを深度合成し、DNG・16bit TIFF・JPEGで書き出すツール">
 <style>
 /* Layout: one narrow column like a camera's settings screen; numbered steps follow the real workflow. */
 :root {
@@ -172,9 +172,9 @@ footer a { color: inherit; }
 <div class="wrap" lang="ja">
   <header>
     <h1><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="var(--accent)"/></svg>RAW深度合成</h1>
-    <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
+    <p class="lede">ピント位置を少しずつ変えて撮ったRAW（DNG）やJPEGなどの写真を合成して、手前から奥までピントの合った1枚に仕上げます。画像はこの端末の中だけで処理され、外部へ送信されることはありません。</p>
     <div class="formats" aria-label="対応形式">
-      <span class="chip">入力 DNG（ベイヤー / LinearRaw）</span>
+      <span class="chip">入力 DNG</span><span class="chip">JPEG・HEIC・PNG・TIFF など</span>
       <span class="chip">出力 DNG</span><span class="chip">16bit TIFF</span><span class="chip">JPEG</span>
     </div>
   </header>
@@ -182,9 +182,9 @@ footer a { color: inherit; }
   <section class="step" aria-labelledby="s1">
     <div class="step-head"><span class="step-no">STEP 1</span><h2 id="s1">RAWファイルを選ぶ</h2></div>
     <div class="drop" id="drop">
-      <strong>DNGファイルをまとめて選択</strong>
-      <span>ピント位置を変えて撮った2枚以上のDNGを選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
-      <input type="file" id="file" multiple aria-label="DNGファイルを選択">
+      <strong>写真をまとめて選択</strong>
+      <span>ピント位置を変えて撮った2枚以上の写真（DNG・JPEGなど）を選んでください。ファイル名の順に合成します。続けて選ぶと、リストに追加されます。</span>
+      <input type="file" id="file" multiple aria-label="写真を選択">
     </div>
     <p class="hint">一度に選べる枚数が限られているときは、何回かに分けて選んでください。選択画面が開かないときは、このページをSafariやChromeで開き直してください。</p>
     <div class="filebar" id="filebar" hidden>
@@ -193,8 +193,10 @@ footer a { color: inherit; }
     </div>
     <ol class="files" id="fileList" hidden></ol>
     <details>
-      <summary>対応しているRAWについて</summary>
+      <summary>対応している形式について</summary>
       <ul>
+        <li>DNG（RAW）のほか、JPEG・HEIC・HEIF・PNG・WebP・AVIF・TIFF（8bit / 16bit）を読み込めます。HEICとHEIFはSafariなど、対応しているブラウザだけで読み込めます。</li>
+        <li>RAWではない画像を合成したときは、保存できる形式はTIFFとJPEGだけになります。RAWとそれ以外の画像を混ぜて合成することはできません。</li>
         <li>iPhone（ProRAW / サードパーティアプリのRAW）、Pixel・Galaxy・Xperiaなど Android のDNGに対応しています。</li>
         <li>カメラ固有のRAW（CR3 / NEF / ARW / RAF など）は、Adobe DNG Converter や Lightroom で DNG に変換してから読み込んでください。</li>
         <li>X-Trans センサーのDNG、浮動小数点DNG（HDR合成済み）には対応していません。</li>
@@ -288,6 +290,7 @@ footer a { color: inherit; }
           <button type="button" data-fmt="jpeg"><b>JPEGで保存</b><span>共有やSNS向け</span></button>
           <button type="button" data-fmt="compare"><b>比較JPEGで保存</b><span>合成前後を並べた1枚。作例の紹介向け</span></button>
         </div>
+        <p class="hint" id="displayNote" hidden>RAWではない画像から合成したため、DNGでは保存できません。</p>
         <div class="saved" id="saved" aria-live="polite"></div>
       </div>
     </div>
